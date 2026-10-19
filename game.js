@@ -16,13 +16,26 @@ var W = sys.windowWidth || 390, H = sys.windowHeight || 844;
 
 var ROUND = 60;
 var TYPES = [
-  {e:'📊', label:'KPI怪',  score:10, w:30, dur:1.00},
-  {e:'📝', label:'周报怪', score:10, w:25, dur:1.00},
-  {e:'👔', label:'甲方怪', score:20, w:20, dur:0.72},
-  {e:'🏠', label:'房贷怪', score:30, w:12, dur:0.88},
-  {e:'☕', label:'咖啡',   score:0,  w:8,  dur:0.85, coffee:true},
-  {e:'🌟', label:'老板',   score:50, w:5,  dur:0.55, boss:true}
+  {e:'📊', label:'KPI怪',  score:10, w:30, dur:1.00, spr:'kpi'},
+  {e:'📝', label:'周报怪', score:10, w:25, dur:1.00, spr:'zhoubao'},
+  {e:'👔', label:'甲方怪', score:20, w:20, dur:0.72, spr:'jiafang'},
+  {e:'🏠', label:'房贷怪', score:30, w:12, dur:0.88, spr:'fangdai'},
+  {e:'☕', label:'咖啡',   score:0,  w:8,  dur:0.85, coffee:true, spr:'kafei'},
+  {e:'🌟', label:'老板',   score:50, w:5,  dur:0.55, boss:true, spr:'laoban'}
 ];
+
+/* ================= 立绘资源 ================= */
+var SPR = {};
+function loadSprites(){
+  ['kpi','zhoubao','jiafang','fangdai','laoban','kafei'].forEach(function(k){
+    try{
+      var img = canvas.createImage();
+      img.onload = function(){ SPR[k] = img; };
+      img.onerror = function(){};
+      img.src = 'assets/'+k+'.png';
+    }catch(e){}
+  });
+}
 
 var state='start', score=0, combo=0, maxCombo=0, timeLeft=ROUND, elapsed=0, spawnT=0;
 var cells=[], monsters=[], parts=[], popups=[];
@@ -208,19 +221,38 @@ function drawGrid(now){
     }
     var s=Math.min(1,age/160), a=1;
     if(age>m.dur-300) a=0.55+0.45*Math.abs(Math.sin(age/60));
-    if(m.type.boss){ ctx.save(); ctx.shadowColor='#ffd54a'; ctx.shadowBlur=26; drawMonster(m,cc,s,a); ctx.restore(); }
-    else drawMonster(m,cc,s,a);
+    drawMonster(m,cc,s,a);
   }
 }
 function drawMonster(m,c,s,alpha){
-  var cx=c.x+cell/2, cy=c.y+cell/2-4;
+  var cx=c.x+cell/2, cy=c.y+cell/2;
   ctx.save(); ctx.globalAlpha=alpha; ctx.translate(cx,cy); ctx.scale(s,s);
-  var fs=cell*0.44;
-  ctx.font=fs+'px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
-  ctx.fillText(m.type.e, 0, -6);
-  ctx.font='700 '+Math.max(11,cell*0.13)+'px sans-serif';
-  ctx.fillStyle=m.type.boss?'#ffd54a':'#aab4e8';
-  ctx.fillText(m.type.label, 0, fs*0.52);
+  var sp = m.type.spr && SPR[m.type.spr];
+  var sz=cell*0.74, topY=-cell/2+4;
+  if(sp){
+    if(m.type.boss){ /* 金色光晕底 */
+      ctx.save(); ctx.shadowColor='#ffd54a'; ctx.shadowBlur=24;
+      ctx.fillStyle='#ffd54a'; rr(-sz/2,topY,sz,sz,14); ctx.fill(); ctx.restore();
+    }
+    ctx.save(); rr(-sz/2,topY,sz,sz,14); ctx.clip();
+    ctx.drawImage(sp,-sz/2,topY,sz,sz); ctx.restore();
+    ctx.strokeStyle=m.type.boss?'rgba(255,213,74,0.9)':'rgba(140,150,220,0.35)';
+    ctx.lineWidth=m.type.boss?2.5:1.2;
+    rr(-sz/2,topY,sz,sz,14); ctx.stroke();
+  } else {
+    var fs=cell*0.44;
+    ctx.font=fs+'px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillText(m.type.e,0,-6);
+  }
+  /* 名称小牌 */
+  ctx.font='700 '+Math.max(11,cell*0.12)+'px sans-serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  var tw=ctx.measureText(m.type.label).width+18;
+  var ly=topY+sz-4;
+  ctx.fillStyle='rgba(8,8,18,0.78)';
+  rr(-tw/2,ly-11,tw,22,11); ctx.fill();
+  ctx.fillStyle=m.type.boss?'#ffd54a':'#dfe5ff';
+  ctx.fillText(m.type.label,0,ly+1);
   ctx.restore();
 }
 function drawParts(){
@@ -338,6 +370,7 @@ function loop(){
 }
 
 layout();
+loadSprites();
 try{
   wx.onWindowResize(function(){ try{ var s=wx.getWindowInfo(); W=s.windowWidth; H=s.windowHeight; DPR=s.pixelRatio||2; }catch(e){} layout(); });
 }catch(e){}
