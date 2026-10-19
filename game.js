@@ -15,6 +15,9 @@ var DPR=sys.pixelRatio||2, W=sys.windowWidth||390, H=sys.windowHeight||844;
 var ROWS=8, COLS=8, NTYPES=5, MOVES=30;
 var SPRKEY=['kpi','zhoubao','jiafang','fangdai','kafei'];
 var EMOJI=['📊','📝','👔','🏠','☕'];
+/* 压力值：房贷5 > KPI3 > 甲方2 > 周报1 = 咖啡1 */
+var PRESSURE=[3,1,2,5,1];
+var PNAME=['KPI','周报','甲方','房贷','咖啡'];
 
 var state='start', score=0, moves=MOVES, cascade=0;
 var board=[], phase='idle', phaseT=0, pend=null, lastFocus=null, selTile=null;
@@ -53,7 +56,7 @@ function tone(f0,f1,dur,type,vol,delay){
     o.start(t); o.stop(t+dur+0.05);
   }catch(e){}
 }
-function sPop(c){ var f=340+Math.min(c,10)*45; tone(f,f*0.5,0.14,'sine',0.22); }
+function sPop(c,p){ var f=430-Math.min(p||1,5)*32+Math.min(c,10)*40; tone(f,f*0.5,0.14,'sine',0.22); }
 function sSwap(){ tone(300,540,0.09,'triangle',0.12); }
 function sDeny(){ tone(190,120,0.13,'sawtooth',0.09); }
 function sSelect(){ tone(660,660,0.05,'sine',0.07); }
@@ -219,11 +222,14 @@ function shuffleBoard(){
 }
 
 /* ============ 特效 ============ */
-function burst(x,y,big){
-  var n=big?22:10, cols=big?['#ffd54a','#ff9100','#ffffff']:['#ff8a80','#ffd54a','#ffffff'];
-  for(var i=0;i<n;i++){ var a=Math.random()*Math.PI*2, s=(big?3.5:2)+Math.random()*3;
+function burst(x,y,big,pv){
+  pv=pv||1;
+  var n=(big?22:8)+pv*3;
+  var cols=big?['#ffd54a','#ff9100','#ffffff']:['#ff8a80','#ffd54a','#ffffff'];
+  if(pv>=5) cols=['#ff5a5a','#ffd54a','#ffffff'];
+  for(var i=0;i<n;i++){ var a=Math.random()*Math.PI*2, s=(big?3:1.5)+Math.random()*(2+pv*0.7);
     parts.push({x:x,y:y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-1.5,life:1,
-      c:cols[(Math.random()*cols.length)|0],r:2+Math.random()*3}); }
+      c:cols[(Math.random()*cols.length)|0],r:1.5+Math.random()*(1.5+pv*0.6)}); }
 }
 function addPopup(x,y,text,color,size){ popups.push({x:x,y:y,text:text,color:color,size:size||18,life:1}); }
 
@@ -283,7 +289,7 @@ function doPop(m,focus){
     if(inM) pcell={r:focus.r,c:focus.c};
     else { var mc=best.cells[(best.cells.length/2)|0]; pcell={r:mc.r,c:mc.c}; }
   }
-  var gained=0;
+  var gained=0, maxP=0, nFangdai=0;
   for(i=0;i<m.cells.length;i++){
     var cc=m.cells[i], t=board[cc.r][cc.c];
     if(!t||t.pop) continue;
@@ -292,20 +298,31 @@ function doPop(m,focus){
       t.t=power; t.pop=0;
       rings.push({x:pp.x,y:pp.y,t0:now,big:true,color:power==='B'?'#ffd54a':'#ff9f1c'});
       addPopup(pp.x,pp.y-8,power==='B'?'老板炸弹!':'锤子!',power==='B'?'#ffd54a':'#ff9f1c',16);
-      burst(pp.x,pp.y,true);
+      burst(pp.x,pp.y,true,3);
     } else {
-      t.pop=now; gained+=10*cascade;
-      burst(pp.x,pp.y,false);
+      var pv=PRESSURE[t.t];
+      t.pop=now; gained+=pv*10*cascade;
+      if(pv>maxP) maxP=pv;
+      if(t.t===3) nFangdai++;
+      burst(pp.x,pp.y,false,pv);
     }
   }
   if(best&&best.len>=4) gained+=(best.len>=5||lshape?150:50)*cascade;
+  var fp=focus?cellXY(focus.r,focus.c):{x:W/2,y:H/2};
+  if(maxP>=5){
+    shakeT=Math.max(shakeT,0.16);
+    rings.push({x:fp.x,y:fp.y,t0:now,big:true,color:'#ff5a5a'});
+    flashA=Math.max(flashA,0.10);
+    if(nFangdai>=2) bigTexts.push({text:'房贷爆了!!',color:'#ff5a5a',t0:now});
+  } else if(maxP>=3){
+    rings.push({x:fp.x,y:fp.y,t0:now,big:false,color:'#ffd54a'});
+  }
   if(gained>0){
     score+=gained;
-    var fp=focus?cellXY(focus.r,focus.c):{x:W/2,y:H/2};
     addPopup(fp.x,fp.y-4,'+'+gained,'#ffd54a',19);
   }
   if(cascade>1) bigTexts.push({text:'连锁 x'+cascade+'!',color:'#69f0ae',t0:now});
-  sPop(Math.min(cascade,8));
+  sPop(Math.min(cascade,8),maxP);
   phase='pop'; phaseT=0.30;
 }
 
@@ -374,7 +391,7 @@ function activateSpecial(r,c){
     t.pop=now;
     for(var dr=-1;dr<=1;dr++) for(var dc=-1;dc<=1;dc++){
       var t2=tileAt(r+dr,c+dc);
-      if(t2&&!t2.pop&&!isSpecial(t2)){ t2.pop=now; score+=15; var q=cellXY(r+dr,c+dc); burst(q.x,q.y,true); }
+      if(t2&&!t2.pop&&!isSpecial(t2)){ t2.pop=now; score+=PRESSURE[t2.t]*10; var q=cellXY(r+dr,c+dc); burst(q.x,q.y,true,3); }
     }
     hammers.push({x:p.x,y:p.y,t0:now});
     rings.push({x:p.x,y:p.y,t0:now,big:true,color:'#ff9f1c'});
@@ -392,7 +409,7 @@ function activateSpecial(r,c){
     var n=0;
     for(rr2=0;rr2<ROWS;rr2++) for(cc2=0;cc2<COLS;cc2++){
       var v=board[rr2][cc2];
-      if(v&&!v.pop&&!isSpecial(v)&&v.t===mt){ v.pop=now; score+=20; n++;
+      if(v&&!v.pop&&!isSpecial(v)&&v.t===mt){ v.pop=now; score+=PRESSURE[v.t]*10; n++;
         var w=cellXY(rr2,cc2); burst(w.x,w.y,false); }
     }
     flashA=0.30; shakeT=0.25;
@@ -489,7 +506,7 @@ function drawBoard(){
   for(r=0;r<ROWS;r++) for(c=0;c<COLS;c++){
     var t=board[r][c]; if(t) drawTile(t);
   }
-  txt('滑动交换 · 凑3连消 · 4连掉锤子 5连掉炸弹',W/2,by+bw+30,12.5,'#8a8aa8','center',600);
+  txt('滑动交换凑3连消 · 房贷>KPI>甲方>周报',W/2,by+bw+30,12.5,'#8a8aa8','center',600);
 }
 
 function drawTile(t){
@@ -622,17 +639,17 @@ function drawStart(){
   ctx.fillStyle=g; ctx.fillText('怒砸KPI',W/2,H*0.20);
   txt(spaced('三消宣泄版'),W/2,H*0.20+48,15,'#9fb0ff','center',700);
   var bw2=Math.min(350,W*0.86), bx2=(W-bw2)/2, by2=H*0.20+84;
-  ctx.fillStyle='#1e1e32'; rr(bx2,by2,bw2,168,14); ctx.fill();
-  ctx.strokeStyle='#34345a'; ctx.lineWidth=1; rr(bx2,by2,bw2,168,14); ctx.stroke();
-  var lines=['8×8 棋盘，滑动交换相邻两只','凑 3 连消，爆!连锁分数翻倍','🔨 4连掉锤子：点爆 3×3','🌟 5连掉老板炸弹：清一色','30 步，无倒计时，慢慢刷分!'];
-  for(var i=0;i<lines.length;i++) txt(lines[i],W/2,by2+26+i*28,14.5,'#d7dcff','center',600);
+  ctx.fillStyle='#1e1e32'; rr(bx2,by2,bw2,196,14); ctx.fill();
+  ctx.strokeStyle='#34345a'; ctx.lineWidth=1; rr(bx2,by2,bw2,196,14); ctx.stroke();
+  var lines=['8×8 棋盘，滑动交换相邻两只','凑 3 连消，爆!连锁分数翻倍','🔨 4连掉锤子：点爆 3×3','🌟 5连掉老板炸弹：清一色','💥 压力值：房贷>KPI>甲方>周报·咖啡','30 步，无倒计时，慢慢刷分!'];
+  for(var i=0;i<lines.length;i++) txt(lines[i],W/2,by2+26+i*27,14,'#d7dcff','center',600);
   button(startBtn,'开始宣泄');
   txt('历史最佳 '+store.get(),W/2,startBtn.y+startBtn.h+30,14,'#8a8aa8','center',600);
 }
 
 function drawEnd(){
   dim();
-  var stars=score>=4000?3:score>=2500?2:score>=1200?1:0;
+  var stars=score>=10000?3:score>=6500?2:score>=3000?1:0;
   txt('对局结束!',W/2,H*0.16,20,'#9fb0ff','center',800);
   ctx.font='44px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
   for(var i=0;i<3;i++){ ctx.fillStyle=i<stars?'#ffd54a':'#3a3a52';
