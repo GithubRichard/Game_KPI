@@ -41,6 +41,7 @@ var state='start', score=0, combo=0, maxCombo=0, timeLeft=ROUND, elapsed=0, spaw
 var cells=[], monsters=[], parts=[], popups=[];
 var cell=0, gx=0, gy=0, hudH=78;
 var bannerT=0, shakeT=0;
+var hammers=[], rings=[], bigTexts=[], flashA=0, freezeT=0, lastTickSec=-1;
 var bg=null;
 var startBtn={x:0,y:0,w:0,h:0}, againBtn={x:0,y:0,w:0,h:0};
 
@@ -150,21 +151,33 @@ function burst(x,y,big){
 function hitAt(px,py){
   for(var i=0;i<9;i++){ var c=cells[i];
     if(px>=c.x&&px<=c.x+cell&&py>=c.y&&py<=c.y+cell){
-      var m=c.m;
+      var m=c.m, nowT=Date.now();
+      hammers.push({x:px,y:py,t0:nowT});
       if(m&&!m.dying){
-        m.dying=Date.now();
+        m.dying=nowT;
         combo++; if(combo>maxCombo) maxCombo=combo;
         if(m.type.coffee){
           timeLeft=Math.min(timeLeft+3,99);
           addPopup(c.x+cell/2, c.y+8, '+3s', '#69f0ae', 24); sCoffee();
+          rings.push({x:px,y:py,t0:nowT,big:false,color:'#69f0ae'});
         } else {
           var gain=m.type.score*mult();
           score+=gain;
           addPopup(c.x+cell/2, c.y+8, '+'+gain, '#ffd54a', 20+Math.min(mult()*2,10));
-          if(m.type.boss){ sBoss(); shakeT=0.28; } else sPop(combo);
+          rings.push({x:px,y:py,t0:nowT,big:!!m.type.boss,color:m.type.boss?'#ff9100':'#ffd54a'});
+          if(m.type.boss){
+            sBoss(); shakeT=0.28; flashA=0.32; freezeT=Math.max(freezeT,0.09);
+            bigTexts.push({text:'💥 BOSS 击破!',color:'#ffd54a',t0:nowT});
+          } else { sPop(combo); freezeT=Math.max(freezeT,0.03); }
+          if(combo>0&&combo%10===0) bigTexts.push({text:'🔥 连击 x'+combo+'!',color:'#ff6b6b',t0:nowT});
+          if(combo>=15){ for(var fi=0;fi<4;fi++)
+            parts.push({x:c.x+cell/2+(Math.random()-0.5)*36, y:c.y+cell/2+10,
+              vx:(Math.random()-0.5)*2.4, vy:-2-Math.random()*2.4, life:1,
+              c:Math.random()<0.5?'#ff9f1c':'#ff4d6d', r:2+Math.random()*2.5}); }
         }
         burst(c.x+cell/2, c.y+cell/2, !!m.type.boss);
       } else {
+        rings.push({x:px,y:py,t0:nowT,big:false,color:'#5a5a78'});
         if(combo>=5) addPopup(px,py,'连击断了!','#ff8a80',16);
         combo=0; sThud();
       }
@@ -177,10 +190,12 @@ function startGame(){
   ensureAudio();
   state='playing'; score=0; combo=0; maxCombo=0; timeLeft=ROUND; elapsed=0;
   monsters=[]; parts=[]; popups=[]; spawnT=0.3; bannerT=0; shakeT=0;
+  hammers=[]; rings=[]; bigTexts=[]; flashA=0; freezeT=0; lastTickSec=-1;
   for(var i=0;i<9;i++) cells[i].m=null;
 }
 function endGame(){
   state='end'; sFanfare();
+  try{ if(score>store.get()) store.set(score); }catch(e){}
 }
 
 /* ================= 绘制 ================= */
@@ -196,6 +211,10 @@ function drawHUD(){
   if(tw>0){ var g=ctx.createLinearGradient(bx,0,bx+bw,0);
     g.addColorStop(0,'#ff4d6d'); g.addColorStop(1,'#ff9f1c');
     ctx.fillStyle=g; rr(bx,by,Math.max(8,bw*tw),bh,7); ctx.fill(); }
+  if(timeLeft<=10&&timeLeft>0){
+    ctx.fillStyle='rgba(255,45,70,'+(0.30+0.30*Math.sin(Date.now()/130)).toFixed(3)+')';
+    rr(bx,by,bw,bh,7); ctx.fill();
+  }
   if(combo>=2) txt('🔥x'+combo, W-14, 36, 20, '#ff6b6b', 'right', 800);
 }
 function drawGrid(now){
@@ -280,6 +299,65 @@ function drawBanner(){
   ctx.fillStyle=g; rr(x,y,w,38,19); ctx.fill(); ctx.restore();
   txt(s, W/2, y+19, 17, '#fff', 'center', 900);
 }
+/* ================= 特效：锤子 / 冲击波 / 大字 / 闪屏 ================= */
+function drawHammer(h,now){
+  var t=(now-h.t0)/340, ang, alpha=1, sc=1;
+  if(t<0.32){ var k=t/0.32; ang=-1.0+1.12*k*k; }
+  else { var k2=(t-0.32)/0.68; ang=0.12-0.12*k2; alpha=1-k2; sc=1+0.08*Math.sin(k2*Math.PI); }
+  ctx.save();
+  ctx.globalAlpha=Math.max(0,alpha);
+  ctx.translate(h.x,h.y); ctx.rotate(ang); ctx.scale(sc,sc);
+  var hg=ctx.createLinearGradient(-9,0,9,0);
+  hg.addColorStop(0,'#8a5a2b'); hg.addColorStop(0.5,'#d09a55'); hg.addColorStop(1,'#8a5a2b');
+  ctx.fillStyle=hg; rr(1,-92,18,78,9); ctx.fill();
+  ctx.fillStyle='#5e3a1a'; rr(1,-20,18,12,6); ctx.fill();
+  ctx.fillStyle='#98a2b3'; rr(-36,-30,72,34,10); ctx.fill();
+  ctx.fillStyle='#c3ccd9'; rr(-36,-30,72,13,10); ctx.fill();
+  ctx.fillStyle='#6e7887'; rr(-28,-21,12,16,5); ctx.fill(); rr(16,-21,12,16,5); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.35)'; rr(-30,-27,60,5,2.5); ctx.fill();
+  ctx.restore();
+}
+function drawHammers(now){
+  for(var i=hammers.length-1;i>=0;i--){
+    if((now-hammers[i].t0)/340>=1){ hammers.splice(i,1); continue; }
+    drawHammer(hammers[i],now);
+  }
+}
+function drawRings(now){
+  for(var i=rings.length-1;i>=0;i--){ var r=rings[i];
+    var t=(now-r.t0)/380;
+    if(t>=1){ rings.splice(i,1); continue; }
+    var rad=(r.big?96:56)*(1-Math.pow(1-t,2.2));
+    ctx.save();
+    ctx.globalAlpha=(1-t)*0.85;
+    ctx.strokeStyle=r.color; ctx.lineWidth=r.big?6:3.5;
+    ctx.beginPath(); ctx.arc(r.x,r.y,Math.max(1,rad),0,7); ctx.stroke();
+    ctx.globalAlpha=(1-t)*0.4; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.arc(r.x,r.y,Math.max(1,rad*0.68),0,7); ctx.stroke();
+    ctx.restore();
+  }
+}
+function drawBigTexts(now){
+  for(var i=bigTexts.length-1;i>=0;i--){ var b=bigTexts[i];
+    var t=(now-b.t0)/1100;
+    if(t>=1){ bigTexts.splice(i,1); continue; }
+    var k=Math.min(1,t/0.28), c1=1.70158, c3=c1+1;
+    var s=1+c3*Math.pow(k-1,3)+c1*Math.pow(k-1,2);
+    var a=t>0.72?Math.max(0,1-(t-0.72)/0.28):1;
+    ctx.save();
+    ctx.globalAlpha=a; ctx.translate(W/2,H*0.42); ctx.scale(Math.max(0.01,s),Math.max(0.01,s));
+    ctx.font='900 34px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.lineWidth=7; ctx.strokeStyle='rgba(0,0,0,0.55)';
+    ctx.strokeText(b.text,0,0);
+    ctx.fillStyle=b.color; ctx.fillText(b.text,0,0);
+    ctx.restore();
+  }
+}
+function drawFlash(){
+  if(flashA<=0) return;
+  ctx.fillStyle='rgba(255,205,80,'+flashA.toFixed(3)+')';
+  ctx.fillRect(0,0,W,H);
+}
 function dim(){ ctx.fillStyle='rgba(12,12,22,0.93)'; ctx.fillRect(0,0,W,H); }
 function button(r,label){
   ctx.save(); ctx.shadowColor='rgba(255,179,0,.4)'; ctx.shadowBlur=18;
@@ -330,6 +408,7 @@ function draw(now){
   if(shakeT>0){ ctx.translate((Math.random()-0.5)*10,(Math.random()-0.5)*10); }
   if(state==='playing'){
     drawHUD(); drawGrid(now); drawParts(); drawBanner();
+    drawRings(now); drawHammers(now); drawBigTexts(now); drawFlash();
   } else if(state==='start'){
     drawGrid(now); drawStart();
   } else {
@@ -354,12 +433,18 @@ var last=Date.now();
 function loop(){
   var now=Date.now(), dt=Math.min(0.05,(now-last)/1000); last=now;
   if(state==='playing'){
-    elapsed+=dt; timeLeft-=dt;
-    if(timeLeft<=0){ timeLeft=0; endGame(); }
-    spawnT-=dt;
-    if(spawnT<=0){ spawn(); spawnT=0.95-(0.95-0.48)*Math.min(1,elapsed/ROUND); }
+    if(freezeT>0){ freezeT-=dt; }
+    else {
+      elapsed+=dt; timeLeft-=dt;
+      if(timeLeft<=0){ timeLeft=0; endGame(); }
+      spawnT-=dt;
+      if(spawnT<=0){ spawn(); spawnT=0.95-(0.95-0.48)*Math.min(1,elapsed/ROUND); }
+    }
     if(bannerT>0) bannerT-=dt;
     if(shakeT>0) shakeT-=dt;
+    if(flashA>0) flashA=Math.max(0,flashA-dt*2.4);
+    var sec=Math.ceil(timeLeft);
+    if(timeLeft<=10&&timeLeft>0&&sec!==lastTickSec){ lastTickSec=sec; tone(880,880,0.07,'square',0.07); }
   } else {
     /* 待机画面也让格子有点生气：偶尔冒个怪 */
     spawnT-=dt;
