@@ -301,14 +301,15 @@ function drawBanner(){
 }
 /* ================= 特效：锤子 / 冲击波 / 大字 / 闪屏 ================= */
 function drawHammer(h,now){
-  /* 轴心在握把（落点上方），锤头从左上划弧线砸向落点 */
+  /* 轴心在握把；整体再顺时针转90度：落点右侧为轴，锤头从右上砸下 */
   var t=(now-h.t0)/340, ang, alpha=1;
   if(t<0.30){ var k=t/0.30; ang=1.15-1.30*k*k*k; }   /* 左上高举→加速砸下 */
   else { var k2=(t-0.30)/0.70; ang=-0.15+0.15*k2; alpha=1-k2*k2; } /* 回弹+淡出 */
+  ang+=Math.PI/2;
   var L=96; /* 握把到锤头中心的距离 */
   ctx.save();
   ctx.globalAlpha=Math.max(0,alpha);
-  ctx.translate(h.x, h.y-L);
+  ctx.translate(h.x+L, h.y);
   ctx.rotate(ang);
   /* 手柄：从握把(0,0)伸向锤头(0,L) */
   var hg=ctx.createLinearGradient(-9,0,9,0);
