@@ -301,20 +301,25 @@ function drawBanner(){
 }
 /* ================= 特效：锤子 / 冲击波 / 大字 / 闪屏 ================= */
 function drawHammer(h,now){
-  var t=(now-h.t0)/340, ang, alpha=1, sc=1;
-  if(t<0.32){ var k=t/0.32; ang=-1.0+1.12*k*k; }
-  else { var k2=(t-0.32)/0.68; ang=0.12-0.12*k2; alpha=1-k2; sc=1+0.08*Math.sin(k2*Math.PI); }
+  /* 轴心在握把（落点上方），锤头划弧线砸向落点 */
+  var t=(now-h.t0)/340, ang, alpha=1;
+  if(t<0.30){ var k=t/0.30; ang=-1.15+1.30*k*k*k; }   /* 高举→加速砸下 */
+  else { var k2=(t-0.30)/0.70; ang=0.15-0.15*k2; alpha=1-k2*k2; } /* 回弹+淡出 */
+  var L=96; /* 握把到锤头中心的距离 */
   ctx.save();
   ctx.globalAlpha=Math.max(0,alpha);
-  ctx.translate(h.x,h.y); ctx.rotate(ang); ctx.scale(sc,sc);
+  ctx.translate(h.x, h.y-L);
+  ctx.rotate(ang);
+  /* 手柄：从握把(0,0)伸向锤头(0,L) */
   var hg=ctx.createLinearGradient(-9,0,9,0);
   hg.addColorStop(0,'#8a5a2b'); hg.addColorStop(0.5,'#d09a55'); hg.addColorStop(1,'#8a5a2b');
-  ctx.fillStyle=hg; rr(1,-92,18,78,9); ctx.fill();
-  ctx.fillStyle='#5e3a1a'; rr(1,-20,18,12,6); ctx.fill();
-  ctx.fillStyle='#98a2b3'; rr(-36,-30,72,34,10); ctx.fill();
-  ctx.fillStyle='#c3ccd9'; rr(-36,-30,72,13,10); ctx.fill();
-  ctx.fillStyle='#6e7887'; rr(-28,-21,12,16,5); ctx.fill(); rr(16,-21,12,16,5); ctx.fill();
-  ctx.fillStyle='rgba(255,255,255,0.35)'; rr(-30,-27,60,5,2.5); ctx.fill();
+  ctx.fillStyle=hg; rr(-9,6,18,L-14,9); ctx.fill();
+  ctx.fillStyle='#5e3a1a'; rr(-9,-5,18,14,7); ctx.fill(); /* 握把帽 */
+  /* 锤头：中心在(0,L)，砸下时正中落点 */
+  ctx.fillStyle='#98a2b3'; rr(-36,L-17,72,34,10); ctx.fill();
+  ctx.fillStyle='#c3ccd9'; rr(-36,L-17,72,13,10); ctx.fill();
+  ctx.fillStyle='#6e7887'; rr(-28,L-8,12,16,5); ctx.fill(); rr(16,L-8,12,16,5); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,0.35)'; rr(-30,L-14,60,5,2.5); ctx.fill();
   ctx.restore();
 }
 function drawHammers(now){
