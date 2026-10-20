@@ -421,7 +421,11 @@ function startGame(m,li){
     var _seed=beijingSeed(), _done='';
     try{ _done=wx.getStorageSync('nkpi_daily_done')||''; }catch(e){}
     dailyPractice=String(_done)===String(_seed);
-    if(!dailyPractice) RND=mulberry32(_seed);
+    if(!dailyPractice){
+      RND=mulberry32(_seed);
+      /* 开局即标记已玩，防止中途退出刷同一种子 */
+      try{ wx.setStorageSync('nkpi_daily_done',String(_seed)); }catch(e){}
+    }
   }
   state='playing'; score=0; cascade=0; collected=0; endWin=false;
   moves=curLevel?curLevel.moves:MOVES;
@@ -738,9 +742,9 @@ function endGame(){
   try{
     if(mode==='daily'){
       if(!dailyPractice){
-        wx.setStorageSync('nkpi_daily_done',String(beijingSeed()));
         if(score>store.getDaily()) store.setDaily(score);
       }
+
     }
     else if(score>store.get()) store.set(score);
   }catch(e){}
