@@ -495,7 +495,8 @@ function afterSwap(){
     var cs=p.clearSwap;
     cs.bomb.pop=Date.now();
     vibrate();
-    clearType(cs.other.t,'清色!');
+    clearType(cs.other.t);
+
     return;
   }
   var m=findMatches();
