@@ -188,17 +188,19 @@ function cellFromXY(x,y){
 }
 
 /* ============ 立绘 ============ */
+function mkImg(){ if(typeof wx.createImage==='function') return wx.createImage(); return canvas.createImage(); }
 function loadSprites(){
   ['kpi','zhoubao','jiafang','fangdai','kafei','laoban','hammer_item'].forEach(function(k){
     try{
-      var img=canvas.createImage();
+      var img=mkImg();
       img.onload=function(){ SPR[k]=img; };
       img.onerror=function(){};
       img.src='assets/'+k+'.png';
     }catch(e){}
   });
   try{
-    var bgi=canvas.createImage();
+    var bgi=mkImg();
+
     bgi.onload=function(){ SPR['bg']=bgi; };
     bgi.onerror=function(){};
     bgi.src='assets/bg.jpg';
