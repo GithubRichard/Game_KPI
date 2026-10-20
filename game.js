@@ -729,13 +729,19 @@ function activateSpecial(r,c){
   else { t.pop=Date.now(); clearType(mostCommonType()); }
 
 }
-function shareScore(){
-  try{
-    wx.shareAppMessage({
-      title:'我在《怒砸KPI》三消版里爆了'+score+'分('+(mode==='daily'?'今日挑战':'经典模式')+')，房贷都被我锤爆了！来战！'
-    });
-  }catch(e){}
+function shareTitle(){
+  if(state!=='end') return '《怒砸KPI》三消宣泄版：把KPI和房贷统统锤爆！';
+  var m=mode==='daily'?(dailyPractice?'每日练习':'今日挑战'):mode==='level'&&curLevel?('第'+(levelIdx+1)+'关·'+curLevel.name):'经典模式';
+  return '我在《怒砸KPI》'+m+'里爆了'+score+'分，房贷都被我锤爆了！来战！';
 }
+function shareScore(){
+  try{ if(typeof wx.shareAppMessage==='function') wx.shareAppMessage({title:shareTitle()}); }catch(e){}
+}
+try{
+  if(typeof wx.showShareMenu==='function') wx.showShareMenu({withShareTicket:true});
+  if(typeof wx.onShareAppMessage==='function') wx.onShareAppMessage(function(){ return {title:shareTitle()}; });
+}catch(e){}
+
 
 function endGame(){
   state='end'; sFanfare();
