@@ -18,23 +18,25 @@ var EMOJI=['📊','📝','👔','🏠','☕'];
 /* 压力值：房贷5 > KPI3 > 甲方2 > 周报1 = 咖啡1 */
 var PRESSURE=[3,1,2,5,1];
 var PNAME=['KPI','周报','甲方','房贷','咖啡'];
-/* 关卡：kind=score 达分 / collect 消指定怪；frozen 冰冻数；weights 出生权重；coffeePlus 咖啡加步；cascadeDouble 连锁翻倍 */
+/* 关卡：压力清零获胜（pressure），分数评星；stressType 指定压力源（消除额外减压） */
 var LEVELS=[
-  {name:'入职第一天', moves:25, kind:'score',   v:2500, stars:[2500,4200,6000]},
-  {name:'周报地狱',   moves:25, kind:'collect', t:1, n:15, stars:[2000,3800,5500]},
-  {name:'甲方爸爸',   moves:26, kind:'collect', t:2, n:16, stars:[2500,4500,6500]},
-  {name:'KPI大考',    moves:28, kind:'score',   v:6000, stars:[6000,9000,13000]},
-  {name:'冰封工位',   moves:28, kind:'score',   v:5000, frozen:6, stars:[5000,8000,12000]},
-  {name:'房贷压顶',   moves:26, kind:'collect', t:3, n:12, weights:[2,2,2,5,2], stars:[3000,5500,8000]},
-  {name:'咖啡续命',   moves:24, kind:'score',   v:7000, coffeePlus:true, stars:[7000,10500,15000]},
-  {name:'连锁风暴',   moves:26, kind:'score',   v:9000, cascadeDouble:true, stars:[9000,14000,20000]},
-  {name:'冰封大楼',   moves:30, kind:'score',   v:8500, frozen:12, stars:[8500,13000,19000]},
-  {name:'终极述职',   moves:30, kind:'collect', t:3, n:18, frozen:6, weights:[2,2,2,5,2], stars:[5000,9000,14000]}
+  {name:'初入职场', moves:25, pressure:60,  stars:[1500,3000,5000]},
+  {name:'四连锤子', moves:25, pressure:70,  stars:[2000,4000,6500]},
+  {name:'周报减压', moves:26, pressure:80,  stressType:1, stars:[2500,4500,7000]},
+  {name:'清色时机', moves:28, pressure:80,  stars:[3000,5500,8500]},
+  {name:'步数规划', moves:22, pressure:90,  stars:[3500,6000,9500]},
+  {name:'冰封工位', moves:28, pressure:90,  frozen:6, stars:[3500,6500,10000]},
+  {name:'房贷压顶', moves:26, pressure:100, stressType:3, weights:[2,2,2,5,2], stars:[4000,7000,11000]},
+  {name:'咖啡续命', moves:24, pressure:90,  coffeePlus:true, stars:[4000,7000,11000]},
+  {name:'连锁风暴', moves:26, pressure:100, cascadeDouble:true, stars:[4500,8000,13000]},
+  {name:'终极述职', moves:30, pressure:120, stressType:3, frozen:6, weights:[2,2,2,5,2], stars:[6000,10000,16000]}
 ];
 var curLevel=null, levelIdx=0, collected=0, endWin=false;
+function relieve(n){ if(mode==='level'&&curLevel){ levelPressure=Math.max(0,levelPressure-n); } }
+function stressBonus(t){ return (curLevel&&curLevel.stressType===t)?1:0; }
 
 var state='start', score=0, moves=MOVES, cascade=0, mode='classic';
-var board=[], phase='idle', phaseT=0, pend=null, lastFocus=null, selTile=null;
+var board=[], phase='idle', phaseT=0, pend=null, lastFocus=null, selTile=null, lastSwapStart=null;
 var parts=[], popups=[], hammers=[], rings=[], bigTexts=[];
 var flashA=0, shakeT=0;
 var bx=0, by=0, cell=40, hudH=96;
@@ -42,7 +44,23 @@ var bg=null;
 var tools={H:1,B:1}, armedTool=null, pendingFree=false;
 var hintCells=null, hintT=0;
 var RND=Math.random;
-var tutDone=false; try{ tutDone=!!wx.getStorageSync('nkpi_tut'); }catch(e){}
+var tutDone=false;
+var paused=false, pendingPause=false, pauseTab='menu', pauseConfirmHome=false;
+var soundOn=true, vibOn=true, reduceMotion=false;
+try{
+  soundOn=wx.getStorageSync('nkpi_sound')!=='0';
+  vibOn=wx.getStorageSync('nkpi_vib')!=='0';
+  reduceMotion=wx.getStorageSync('nkpi_rm')==='1';
+  tutDone=!!wx.getStorageSync('nkpi_tutdone');
+}catch(e){}
+var pauseBtn={x:0,y:0,w:0,h:0}, skipBtn={x:0,y:0,w:0,h:0};
+var pauseCard={x:0,y:0,w:0,h:0};
+var pResume={x:0,y:0,w:0,h:0}, pHelp={x:0,y:0,w:0,h:0}, pSound={x:0,y:0,w:0,h:0};
+var pVib={x:0,y:0,w:0,h:0}, pMotion={x:0,y:0,w:0,h:0}, pHome={x:0,y:0,w:0,h:0};
+var shakeTiles=null, shakeT0=0, previewCell=null;
+var levelPressure=0, levelPressureMax=100;
+var dailyPractice=false;
+var tutStep=-1, tutText='', tutHammerUsed=false, tutToolUsed=false;
 var startBtn={x:0,y:0,w:0,h:0}, againBtn={x:0,y:0,w:0,h:0};
 var modeBtn={x:0,y:0,w:0,h:0}, shareBtn={x:0,y:0,w:0,h:0};
 var levelsBtn={x:0,y:0,w:0,h:0}, backBtn={x:0,y:0,w:0,h:0};
@@ -53,8 +71,8 @@ var store={
   _m:0,
   get:function(){ try{ var v=wx.getStorageSync('nkpi_best'); return parseInt(v||'0',10)||0; }catch(e){ return this._m; } },
   set:function(v){ this._m=v; try{ wx.setStorageSync('nkpi_best', String(v)); }catch(e){} },
-  getDaily:function(){ try{ var d=wx.getStorageSync('nkpi_daily_date'); if(String(d)===String(todaySeed())) return parseInt(wx.getStorageSync('nkpi_daily_best')||'0',10)||0; }catch(e){} return 0; },
-  setDaily:function(v){ try{ wx.setStorageSync('nkpi_daily_date',String(todaySeed())); wx.setStorageSync('nkpi_daily_best',String(v)); }catch(e){} }
+  getDaily:function(){ try{ var d=wx.getStorageSync('nkpi_daily_date'); if(String(d)===String(beijingSeed())) return parseInt(wx.getStorageSync('nkpi_daily_best')||'0',10)||0; }catch(e){} return 0; },
+  setDaily:function(v){ try{ wx.setStorageSync('nkpi_daily_date',String(beijingSeed())); wx.setStorageSync('nkpi_daily_best',String(v)); }catch(e){} }
 };
 
 /* ============ 音频（WebAudio 合成，无资源） ============ */
@@ -66,6 +84,7 @@ function ensureAudio(){
   return actx;
 }
 function tone(f0,f1,dur,type,vol,delay){
+  if(!soundOn) return;
   var ac=ensureAudio(); if(!ac) return;
   try{
     var t=ac.currentTime+(delay||0);
@@ -79,12 +98,15 @@ function tone(f0,f1,dur,type,vol,delay){
     o.start(t); o.stop(t+dur+0.05);
   }catch(e){}
 }
+function vibrate(){ if(!vibOn) return; try{ wx.vibrateShort&&wx.vibrateShort(); }catch(e){} }
+function setPref(k,v){ try{ wx.setStorageSync(k,v); }catch(e){} }
 function sPop(c,p){ var f=430-Math.min(p||1,5)*32+Math.min(c,10)*40; tone(f,f*0.5,0.14,'sine',0.22); }
 function sSwap(){ tone(300,540,0.09,'triangle',0.12); }
 function sDeny(){ tone(190,120,0.13,'sawtooth',0.09); }
 function sSelect(){ tone(660,660,0.05,'sine',0.07); }
 function sSmash(){ tone(220,660,0.22,'square',0.10); tone(140,70,0.2,'sawtooth',0.12,0.02); noiseBurst(0.28,0.28,800); }
 function noiseBurst(dur,vol,fc){
+  if(!soundOn) return;
   var ac=ensureAudio(); if(!ac) return;
   try{
     var len=Math.max(1,Math.floor(ac.sampleRate*dur));
@@ -119,13 +141,23 @@ function layout(){
   toolHBtn={x:tx0,y:ty2,w:tw,h:44};
   toolBBtn={x:tx0+tw+10,y:ty2,w:tw,h:44};
   hintBtn={x:tx0+tw*2+20,y:ty2,w:tw,h:44};
+  pauseBtn={x:W-54,y:10,w:44,h:44};
+  skipBtn={x:W-116,y:60,w:104,h:34};
+  var pw2=Math.min(300,W*0.8), px2=(W-pw2)/2, py2=H*0.24;
+  pauseCard={x:px2,y:py2,w:pw2,h:392};
+  pResume={x:px2+28,y:py2+64,w:pw2-56,h:44};
+  pHelp={x:px2+28,y:py2+114,w:pw2-56,h:44};
+  pSound={x:px2+28,y:py2+164,w:pw2-56,h:38};
+  pVib={x:px2+28,y:py2+208,w:pw2-56,h:38};
+  pMotion={x:px2+28,y:py2+252,w:pw2-56,h:38};
+  pHome={x:px2+28,y:py2+300,w:pw2-56,h:44};
 }
 function makeBG(){
   try{
     bg=wx.createCanvas(); bg.width=Math.round(W*DPR); bg.height=Math.round(H*DPR);
     var b=bg.getContext('2d'); b.setTransform(DPR,0,0,DPR,0,0);
     var g=b.createRadialGradient(W/2,0,10,W/2,0,H*0.75);
-    g.addColorStop(0,'#303052'); g.addColorStop(1,'#1d1d2e');
+    g.addColorStop(0,'#e6efff'); g.addColorStop(1,'#fdf6e8');
     b.fillStyle=g; b.fillRect(0,0,W,H);
   }catch(e){ bg=null; }
 }
@@ -182,7 +214,7 @@ function levelRect(i){
   return {x:x0+(i%cols)*(s+gap), y:y0+((i/cols)|0)*(s+gap+16), w:s, h:s};
 }
 function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; var t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
-function todaySeed(){ var d=new Date(); return d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate(); }
+function beijingSeed(){ var d=new Date(Date.now()+8*3600*1000); return d.getUTCFullYear()*10000+(d.getUTCMonth()+1)*100+d.getUTCDate(); }
 function randType(){
   var w=(curLevel&&curLevel.weights)?curLevel.weights:null;
   if(!w) return (RND()*NTYPES)|0;
@@ -251,7 +283,6 @@ function mostCommonType(){
   for(var i=1;i<NTYPES;i++) if(cnt[i]>cnt[mt]) mt=i;
   return mt;
 }
-function noteCollect(tp){ if(mode==='level'&&curLevel&&curLevel.kind==='collect'&&tp===curLevel.t) collected++; }
 
 function newBoard(){
   var guard=0;
@@ -293,14 +324,82 @@ function burst(x,y,big,pv){
 function addPopup(x,y,text,color,size){ popups.push({x:x,y:y,text:text,color:color,size:size||18,life:1}); }
 
 /* ============ 流程 ============ */
+/* 三步新手引导（文档§2）：独立棋盘，不影响纪录 */
+function startTutorial(){
+  ensureAudio();
+  mode='tutorial'; tutStep=0; tutHammerUsed=false; tutToolUsed=false;
+  RND=Math.random;
+  state='playing'; score=0; moves=99; cascade=0;
+  parts=[]; popups=[]; hammers=[]; rings=[]; bigTexts=[];
+  flashA=0; shakeT=0; selTile=null; pend=null; lastFocus=null;
+  tools={H:0,B:0}; armedTool=null; pendingFree=false; hintCells=null;
+  phase='idle'; phaseT=0;
+  setupTutBoard(0);
+  tutText='👆 拖动或点两格，交换发光的格子！';
+}
+function setupTutBoard(step){
+  var guard=0, r, c;
+  do{
+    for(r=0;r<ROWS;r++){ board[r]=[];
+      for(c=0;c<COLS;c++){ var t=mkTile(randType()), p=cellXY(r,c);
+        t.x=p.x; t.y=p.y; t.tx=p.x; t.ty=p.y; board[r][c]=t; } }
+    if(step===0){
+      /* 横向：row3=[0,0,1,0]，交换 c2/c3 → 三连 */
+      board[3][0].t=0; board[3][1].t=0; board[3][2].t=1; board[3][3].t=0;
+      hintCells={a:{r:3,c:2},b:{r:3,c:3}};
+    } else {
+      /* 纵向借位：row4=[2,2,3,2] 且 (3,2)=2，把 (4,2) 往上滑 → row4 四连；
+         c4 固定≠2，保证恰好四连不变成五连 */
+      board[4][0].t=2; board[4][1].t=2; board[4][2].t=3; board[4][3].t=2;
+      board[4][4].t=3; board[3][2].t=2;
+      hintCells={a:{r:4,c:2},b:{r:3,c:2}};
+    }
+    guard++;
+  }while(findMatches().cells.length>0&&guard<300);
+  selTile=null; phase='idle';
+}
+function tutAdvance(){
+  phase='idle'; selTile=null;
+  if(tutStep===0){
+    tutStep=1; setupTutBoard(1);
+    tutText='四连会掉锤子🔨！把发光的格子往上滑';
+  } else if(tutStep===1){
+    if(tutHammerUsed){
+      tutStep=2; tools={H:1,B:1}; hintCells=null;
+      tutText='点 🔨 道具，再点棋盘任意处！';
+    } else {
+      tutText='点一下发光的特殊棋子，试试爆破！';
+      for(var r=0;r<ROWS;r++) for(var c=0;c<COLS;c++){
+        var t=board[r][c];
+        if(t&&isSpecial(t)&&!t.pop) hintCells={a:{r:r,c:c},b:{r:r,c:c}};
+      }
+    }
+  } else if(tutStep===2){
+    if(tutToolUsed) finishTutorial();
+    else tutText='点 🔨 道具，再点棋盘任意处！';
+  }
+}
+function finishTutorial(){
+  try{ wx.setStorageSync('nkpi_tutdone','1'); }catch(e){}
+  tutDone=true; tutStep=-1; tutText=''; hintCells=null;
+  startGame('classic');
+}
 function startGame(m,li){
   ensureAudio();
   mode=m||'classic';
   levelIdx=li||0;
   curLevel=mode==='level'?LEVELS[levelIdx]:null;
-  RND = mode==='daily' ? mulberry32(todaySeed()) : Math.random;
+  RND=Math.random;
+  dailyPractice=false;
+  if(m==='daily'){
+    var _seed=beijingSeed(), _done='';
+    try{ _done=wx.getStorageSync('nkpi_daily_done')||''; }catch(e){}
+    dailyPractice=String(_done)===String(_seed);
+    if(!dailyPractice) RND=mulberry32(_seed);
+  }
   state='playing'; score=0; cascade=0; collected=0; endWin=false;
   moves=curLevel?curLevel.moves:MOVES;
+  if(curLevel){ levelPressure=curLevel.pressure; levelPressureMax=curLevel.pressure; }
   parts=[]; popups=[]; hammers=[]; rings=[]; bigTexts=[];
   flashA=0; shakeT=0; selTile=null; pend=null; lastFocus=null;
   tools={H:1,B:1}; armedTool=null; pendingFree=false;
@@ -320,24 +419,37 @@ function trySwap(r1,c1,r2,c2){
   if(phase!=='idle'||state!=='playing') return;
   var a=board[r1][c1], b=board[r2][c2];
   if(!a||!b) return;
-  if(isSpecial(a)||isSpecial(b)){ sDeny(); return; }
   if(a.ice||b.ice){ sDeny(); return; }
+  /* 清色棋子：与相邻普通棋子交换 → 清除该类（文档§3），耗1步 */
+  var bomb=null, other=null;
+  if(a.t==='B'&&!isSpecial(b)){ bomb=a; other=b; }
+  else if(b.t==='B'&&!isSpecial(a)){ bomb=b; other=a; }
+  else if(isSpecial(a)||isSpecial(b)){ sDeny(); return; }
   board[r1][c1]=b; board[r2][c2]=a;
   var p1=cellXY(r1,c1), p2=cellXY(r2,c2);
   a.tx=p2.x; a.ty=p2.y; b.tx=p1.x; b.ty=p1.y;
-  pend={a:a,b:b,r1:r1,c1:c1,r2:r2,c2:c2};
-  lastFocus={r:r2,c:c2};
+  pend={a:a,b:b,r1:r1,c1:c1,r2:r2,c2:c2,clearSwap:bomb?{bomb:bomb,other:other}:null};
+  lastFocus={r:r2,c:c2}; lastSwapStart={r:r1,c:c1};
   cascade=0;
   phase='swap'; phaseT=0.16; sSwap();
 }
 
 function afterSwap(){
-  var m=findMatches(), p=pend; pend=null;
+  var p=pend; pend=null;
+  if(p.clearSwap){
+    var cs=p.clearSwap;
+    cs.bomb.pop=Date.now();
+    vibrate();
+    clearType(cs.other.t,'清色!');
+    return;
+  }
+  var m=findMatches();
   if(!m.cells.length){
     board[p.r1][p.c1]=p.a; board[p.r2][p.c2]=p.b;
     var q1=cellXY(p.r1,p.c1), q2=cellXY(p.r2,p.c2);
     p.a.tx=q1.x; p.a.ty=q1.y; p.b.tx=q2.x; p.b.ty=q2.y;
     phase='back'; phaseT=0.16; sDeny();
+    shakeTiles=[p.a,p.b]; shakeT0=Date.now();
   } else {
     doPop(m,lastFocus);
   }
@@ -345,27 +457,29 @@ function afterSwap(){
 
 function doPop(m,focus){
   cascade++;
-  if(!tutDone){ tutDone=true; try{ wx.setStorageSync('nkpi_tut','1'); }catch(e){} }
   var now=Date.now(), i, j;
   var best=null;
   for(i=0;i<m.groups.length;i++) if(!best||m.groups[i].len>best.len) best=m.groups[i];
-  var cnt={};
-  for(i=0;i<m.groups.length;i++){ var g=m.groups[i];
-    for(j=0;j<g.cells.length;j++){ var kk=g.cells[j].r+':'+g.cells[j].c; cnt[kk]=(cnt[kk]||0)+1; } }
-  var lshape=false; for(var kk2 in cnt) if(cnt[kk2]>1) lshape=true;
-  var power=null;
-  if(best&&(best.len>=5||lshape)) power='B';
+  /* 文档规则：直线五连→清色，四连→锤子；T/L形按普通交叉结算，不产道具 */
+  var power=null, genBonus=0;
+  if(best&&best.len>=5) power='B';
   else if(best&&best.len===4) power='H';
   var pcell=null;
   if(power){
-    var inM=false;
-    if(focus) for(i=0;i<m.cells.length;i++)
-      if(m.cells[i].r===focus.r&&m.cells[i].c===focus.c){ inM=true; break; }
+    /* 生成位置：交换目标格优先，其次交换起点（文档A02） */
+    var inM=false, inS=false;
+    for(i=0;i<m.cells.length;i++){
+      if(focus&&m.cells[i].r===focus.r&&m.cells[i].c===focus.c) inM=true;
+      if(lastSwapStart&&m.cells[i].r===lastSwapStart.r&&m.cells[i].c===lastSwapStart.c) inS=true;
+    }
     if(inM) pcell={r:focus.r,c:focus.c};
+    else if(inS) pcell={r:lastSwapStart.r,c:lastSwapStart.c};
     else { var mc=best.cells[(best.cells.length/2)|0]; pcell={r:mc.r,c:mc.c}; }
+    relieve(power==='B'?4:2);
+    genBonus=power==='B'?40:20;
   }
   var cmult=cascade*((curLevel&&curLevel.cascadeDouble)?2:1);
-  var gained=0, maxP=0, nFangdai=0, nCoffee=0;
+  var gained=genBonus, maxP=0, nFangdai=0, nCoffee=0;
   for(i=0;i<m.cells.length;i++){
     var cc=m.cells[i], t=board[cc.r][cc.c];
     if(!t||t.pop) continue;
@@ -382,14 +496,13 @@ function doPop(m,focus){
     } else {
       var pv=PRESSURE[t.t];
       t.pop=now; gained+=pv*10*cmult;
+      relieve(1+stressBonus(t.t));
       if(pv>maxP) maxP=pv;
       if(t.t===3) nFangdai++;
       if(t.t===4) nCoffee++;
-      noteCollect(t.t);
       burst(pp.x,pp.y,false,pv);
     }
   }
-  if(best&&best.len>=4) gained+=(best.len>=5||lshape?150:50)*cmult;
   var fp=focus?cellXY(focus.r,focus.c):{x:W/2,y:H/2};
   if(maxP>=5){
     shakeT=Math.max(shakeT,0.16);
@@ -411,7 +524,7 @@ function doPop(m,focus){
     var praise=cascade>=4?'神之一手!':cascade===3?'无敌!':'漂亮!';
     bigTexts.push({text:praise+' ×'+cascade,color:'#69f0ae',t0:now});
   }
-  sPop(Math.min(cascade,8),maxP);
+  sPop(Math.min(cascade,8),maxP); vibrate();
   phase='pop'; phaseT=0.36;
 }
 
@@ -462,6 +575,7 @@ function onSettled(){
 function endMove(){
   if(pendingFree) pendingFree=false; else moves--;
   cascade=0; lastFocus=null; selTile=null;
+  if(mode==='tutorial'){ tutAdvance(); return; }
   if(mode==='level'){
     if(targetMet()){ levelEnd(true); return; }
     if(moves<=0){ levelEnd(false); return; }
@@ -475,16 +589,17 @@ function endMove(){
 
 function smashAt(r,c){
   var now=Date.now(), p=cellXY(r,c);
+  if(mode==='tutorial') tutHammerUsed=true;
   lastFocus={r:r,c:c}; cascade=0;
   var tc=tileAt(r,c);
   if(tc&&isSpecial(tc)) tc.pop=now;
   for(var dr=-1;dr<=1;dr++) for(var dc=-1;dc<=1;dc++){
     var t2=tileAt(r+dr,c+dc);
-    if(t2&&!t2.pop&&!isSpecial(t2)){ t2.pop=now; score+=PRESSURE[t2.t]*10; noteCollect(t2.t); var q=cellXY(r+dr,c+dc); burst(q.x,q.y,true,3); }
+    if(t2&&!t2.pop&&!isSpecial(t2)){ t2.pop=now; score+=PRESSURE[t2.t]*10; relieve(1+stressBonus(t2.t)); var q=cellXY(r+dr,c+dc); burst(q.x,q.y,true,3); }
   }
   hammers.push({x:p.x,y:p.y,t0:now});
   rings.push({x:p.x,y:p.y,t0:now,big:true,color:'#ff9f1c'});
-  shakeT=0.22; sSmash();
+  shakeT=0.22; sSmash(); vibrate();
   addPopup(p.x,p.y-cell,'锤爆 3×3!','#ff9f1c',20);
   phase='pop'; phaseT=0.36;
 }
@@ -494,7 +609,7 @@ function clearType(tp,label){
   var n=0;
   for(var r=0;r<ROWS;r++) for(var c=0;c<COLS;c++){
     var v=board[r][c];
-    if(v&&!v.pop&&!isSpecial(v)&&v.t===tp){ v.pop=now; score+=PRESSURE[v.t]*10; noteCollect(v.t); n++;
+    if(v&&!v.pop&&!isSpecial(v)&&v.t===tp){ v.pop=now; score+=PRESSURE[v.t]*10; relieve(1+stressBonus(v.t)); n++;
       var w=cellXY(r,c); burst(w.x,w.y,false,2); }
   }
   flashA=0.30; shakeT=0.25;
@@ -505,6 +620,7 @@ function clearType(tp,label){
 function useTool(kind,r,c){
   if(tools[kind]<=0||phase!=='idle'||state!=='playing') return;
   tools[kind]--; armedTool=null; hintCells=null;
+  if(mode==='tutorial') tutToolUsed=true;
   pendingFree=true;
   if(kind==='H') smashAt(r,c);
   else { var t=tileAt(r,c); clearType((t&&!isSpecial(t))?t.t:mostCommonType()); }
@@ -525,6 +641,7 @@ function activateSpecial(r,c){
   if(phase!=='idle'||state!=='playing') return;
   var t=board[r][c];
   if(!t||!isSpecial(t)) return;
+  if(mode==='tutorial') tutHammerUsed=true;
   if(t.t==='H') smashAt(r,c);
   else { t.pop=Date.now(); clearType(mostCommonType(),'老板清场!'); }
 }
@@ -539,13 +656,17 @@ function shareScore(){
 function endGame(){
   state='end'; sFanfare();
   try{
-    if(mode==='daily'){ if(score>store.getDaily()) store.setDaily(score); }
+    if(mode==='daily'){
+      if(!dailyPractice){
+        wx.setStorageSync('nkpi_daily_done',String(beijingSeed()));
+        if(score>store.getDaily()) store.setDaily(score);
+      }
+    }
     else if(score>store.get()) store.set(score);
   }catch(e){}
 }
 function targetMet(){
-  if(!curLevel) return false;
-  return curLevel.kind==='score'? score>=curLevel.v : collected>=curLevel.n;
+  return !!(curLevel&&levelPressure<=0);
 }
 function starCount(){
   var s=curLevel.stars;
@@ -591,13 +712,15 @@ var tS=null;
 try{
   wx.onTouchStart(function(e){
     var t=e.touches&&e.touches[0];
-    if(t){ tS={x:t.clientX,y:t.clientY}; ensureAudio(); }
+    if(t){ tS={x:t.clientX,y:t.clientY}; ensureAudio();
+      if(armedTool&&state==='playing'&&!paused) previewCell=cellFromXY(t.clientX,t.clientY); }
   });
   wx.onTouchEnd(function(e){
-    var t=e.changedTouches&&e.changedTouches[0], s0=tS; tS=null;
+    var t=e.changedTouches&&e.changedTouches[0], s0=tS; tS=null; previewCell=null;
     if(!t||!s0) return;
+    if(paused){ handlePauseTap(t.clientX,t.clientY); return; }
     if(state==='start'){
-      if(inRect(t.clientX,t.clientY,startBtn)) startGame('classic');
+      if(inRect(t.clientX,t.clientY,startBtn)){ if(!tutDone) startTutorial(); else startGame('classic'); }
       else if(inRect(t.clientX,t.clientY,modeBtn)) startGame('daily');
       else if(inRect(t.clientX,t.clientY,levelsBtn)) state='levels';
       return;
@@ -626,6 +749,8 @@ try{
       }
       return;
     }
+    if(mode==='tutorial'&&inRect(t.clientX,t.clientY,skipBtn)){ finishTutorial(); return; }
+    if(inRect(t.clientX,t.clientY,pauseBtn)){ pendingPause=true; return; }
     if(phase!=='idle') return;
     if(inRect(t.clientX,t.clientY,toolHBtn)){ toggleTool('H'); return; }
     if(inRect(t.clientX,t.clientY,toolBBtn)){ toggleTool('B'); return; }
@@ -660,60 +785,82 @@ function drawBG(){
   if(bgi&&bgi.width){
     var iw=bgi.width, ih=bgi.height;
     var sc=Math.max(W/iw,H/ih), dw=iw*sc, dh=ih*sc;
-    ctx.save(); ctx.globalAlpha=0.55;
+    ctx.save(); ctx.globalAlpha=0.8;
     ctx.drawImage(bgi,(W-dw)/2,(H-dh)/2,dw,dh);
     ctx.restore();
-    ctx.fillStyle='rgba(22,22,40,0.24)'; ctx.fillRect(0,0,W,H);
+    var veil=0.08;
+    if(mode==='level'&&curLevel&&levelPressureMax>0) veil=0.04+0.22*(levelPressure/levelPressureMax);
+    ctx.fillStyle='rgba(255,255,255,'+veil.toFixed(2)+')'; ctx.fillRect(0,0,W,H);
   }
 }
 
 function drawHUD(){
   var urgent=moves<=5&&state==='playing';
-  txt('步数',20,20,13,'#9fb0ff','left',700);
-  var mc=urgent?'#ff5a5a':'#ffd54a';
-  if(urgent) ctx.save(), ctx.globalAlpha=0.55+0.45*Math.sin(Date.now()/150);
+  txt('步数',20,20,13,'#7a7ab8','left',700);
+  var mc=urgent?'#ff4a4a':'#ff8f00';
+  if(urgent&&!reduceMotion){ ctx.save(); ctx.globalAlpha=0.55+0.45*Math.sin(Date.now()/150); }
   txt(String(moves),20,50,36,mc,'left',900);
-  if(urgent) ctx.restore();
-  txt('分数',W-20,20,13,'#9fb0ff','right',700);
-  txt(String(score),W-20,50,30,'#ffffff','right',900);
+  if(urgent&&!reduceMotion) ctx.restore();
+  txt('分数',W-66,20,13,'#7a7ab8','right',700);
+  txt(String(score),W-66,50,30,'#2b2b3d','right',900);
   var best=mode==='daily'?store.getDaily():store.get();
-  if(best>0) txt((mode==='daily'?'今日':'历史')+'最佳 '+Math.max(best,score),W-20,76,12,'#8a8aa8','right',600);
-  if(mode==='daily') txt('📅 今日挑战',W/2,20,13,'#9fb0ff','center',700);
+  if(best>0) txt((mode==='daily'?'今日':'历史')+'最佳 '+Math.max(best,score),W-66,76,12,'#9a9ab8','right',600);
+  ctx.fillStyle='rgba(255,255,255,0.92)'; rr(pauseBtn.x,pauseBtn.y,pauseBtn.w,pauseBtn.h,12); ctx.fill();
+  ctx.strokeStyle='rgba(110,130,210,0.5)'; ctx.lineWidth=1.5; rr(pauseBtn.x,pauseBtn.y,pauseBtn.w,pauseBtn.h,12); ctx.stroke();
+  txt('⏸',pauseBtn.x+pauseBtn.w/2,pauseBtn.y+pauseBtn.h/2+1,17,'#3a4a8a','center',700);
+  if(mode==='daily') txt(dailyPractice?'· 练习 ·':'📅 今日挑战',W/2,20,13,'#5a6ab8','center',700);
   if(mode==='level'&&curLevel){
-    var tg=curLevel.kind==='score'?('🎯 '+Math.min(score,curLevel.v)+'/'+curLevel.v):('🎯 '+PNAME[curLevel.t]+' 还差 '+Math.max(0,curLevel.n-collected));
-    txt(tg,W/2,20,13.5,'#ffd54a','center',800);
-    txt('第'+(levelIdx+1)+'关 · '+curLevel.name,W/2,44,11.5,'#8a8aa8','center',600);
+    var pw=120, px=W/2-pw/2+8;
+    txt('😮‍💨',px-16,32,15,'#7a7ab8','center',700);
+    ctx.fillStyle='rgba(120,130,180,0.25)'; rr(px,26,pw,10,5); ctx.fill();
+    var pr=levelPressureMax>0?levelPressure/levelPressureMax:0;
+    if(pr>0){ ctx.fillStyle=pr>0.5?'#ff5a5a':pr>0.25?'#ff9f1c':'#35c26e'; rr(px,26,Math.max(10,pw*pr),10,5); ctx.fill(); }
+    txt(String(levelPressure),px+pw+8,32,13,'#2b2b3d','left',800);
+    txt('第'+(levelIdx+1)+'关 · '+curLevel.name,W/2,50,11.5,'#8a8ab8','center',600);
+  }
+  if(mode==='tutorial'&&tutText){
+    var tw2=Math.min(W-40, tutText.length*15+40);
+    ctx.fillStyle='rgba(255,255,255,0.95)'; rr(W/2-tw2/2,52,tw2,34,17); ctx.fill();
+    ctx.strokeStyle='rgba(255,160,0,0.55)'; ctx.lineWidth=1.5; rr(W/2-tw2/2,52,tw2,34,17); ctx.stroke();
+    txt(tutText,W/2,70,13.5,'#b36a00','center',800);
   }
 }
 
 function drawBoard(){
   var bw=cell*COLS;
-  ctx.fillStyle='rgba(255,255,255,0.09)';
+  ctx.fillStyle='rgba(255,255,255,0.55)';
   rr(bx-6,by-6,bw+12,bw+12,18); ctx.fill();
-  ctx.strokeStyle='rgba(160,170,240,0.28)'; ctx.lineWidth=1.5;
+  ctx.strokeStyle='rgba(110,130,210,0.35)'; ctx.lineWidth=1.5;
   rr(bx-6,by-6,bw+12,bw+12,18); ctx.stroke();
   var r,c;
   for(r=0;r<ROWS;r++) for(c=0;c<COLS;c++){
     var t=board[r][c]; if(t) drawTile(t);
   }
-  txt('滑动交换凑3连消 · 房贷>KPI>甲方>周报',W/2,by+bw+30,12.5,'#8a8aa8','center',600);
+  txt('滑动交换凑3连消 · 关卡里先清压力',W/2,by+bw+30,12.5,'#9a9ab8','center',600);
 }
 
 function drawTile(t){
   var now=Date.now(), s=cell*0.90;
   var scX=1, scY=1, alpha=1;
   if(t.pop){
-    var pt=(now-t.pop)/360;
+    var pt=(now-t.pop)/(reduceMotion?160:360);
     if(pt>=1) return;
     /* Q弹果冻：先压扁蓄力 → 回弹震荡 → 缩小消失 */
     var env=pt<0.30?1:1-Math.pow((pt-0.30)/0.70,2);
-    var wob=Math.sin(pt*Math.PI*2.6)*(1-pt)*0.30;
+    var wob=reduceMotion?0:Math.sin(pt*Math.PI*2.6)*(1-pt)*0.30;
     scX=Math.max(0.01,env*(1+wob)); scY=Math.max(0.01,env*(1-wob));
     alpha=pt<0.55?1:1-(pt-0.55)/0.45;
+  } else if(selTile&&board[selTile.r]&&board[selTile.r][selTile.c]===t){
+    scX=1.05; scY=1.05;
   }
   ctx.save();
   ctx.globalAlpha=Math.max(0,alpha);
-  ctx.translate(t.x,t.y); ctx.scale(scX,scY);
+  ctx.translate(t.x,t.y);
+  if(shakeTiles&&(shakeTiles[0]===t||shakeTiles[1]===t)&&!reduceMotion){
+    var st=(now-shakeT0)/300;
+    if(st<1) ctx.translate(Math.sin(st*Math.PI*3)*5*(1-st),0);
+  }
+  ctx.scale(scX,scY);
   /* 立体感：底部投影 */
   ctx.fillStyle='rgba(0,0,0,0.32)';
   rr(-s/2,-s/2+3,s,s,12); ctx.fill();
@@ -779,6 +926,9 @@ function drawParts(){
     t.y-=1.4; t.life-=0.03;
     if(t.life<=0){ popups.splice(i,1); continue; }
     ctx.globalAlpha=Math.max(0,Math.min(1,t.life*1.6));
+    ctx.font='900 '+t.size+'px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.lineWidth=4; ctx.strokeStyle='rgba(255,255,255,0.9)';
+    ctx.strokeText(t.text,t.x,t.y);
     txt(t.text,t.x,t.y,t.size,t.color,'center',900); ctx.globalAlpha=1; }
 }
 
@@ -835,32 +985,32 @@ function drawBigTexts(now){
   }
 }
 function drawFlash(){
-  if(flashA<=0) return;
+  if(reduceMotion||flashA<=0) return;
   ctx.fillStyle='rgba(255,205,80,'+flashA.toFixed(3)+')';
   ctx.fillRect(0,0,W,H);
 }
 
 function button2(r,label){
-  ctx.fillStyle='rgba(255,255,255,0.07)'; rr(r.x,r.y,r.w,r.h,r.h/2); ctx.fill();
-  ctx.strokeStyle='#9fb0ff'; ctx.lineWidth=1.5; rr(r.x,r.y,r.w,r.h,r.h/2); ctx.stroke();
-  txt(label,r.x+r.w/2,r.y+r.h/2+1,16,'#d7dcff','center',800);
+  ctx.fillStyle='rgba(255,255,255,0.95)'; rr(r.x,r.y,r.w,r.h,r.h/2); ctx.fill();
+  ctx.strokeStyle='#7a8fd0'; ctx.lineWidth=1.5; rr(r.x,r.y,r.w,r.h,r.h/2); ctx.stroke();
+  txt(label,r.x+r.w/2,r.y+r.h/2+1,16,'#3a4a8a','center',800);
 }
 function toolBtn(r,icon,n,armed){
-  ctx.fillStyle=armed?'#5a3a10':'#33335e'; rr(r.x,r.y,r.w,r.h,12); ctx.fill();
-  ctx.strokeStyle=armed?'#ffb300':'#4a4a6a'; ctx.lineWidth=armed?2.5:1.5;
+  ctx.fillStyle=armed?'#ffe9c2':'rgba(255,255,255,0.92)'; rr(r.x,r.y,r.w,r.h,12); ctx.fill();
+  ctx.strokeStyle=armed?'#ff9f1c':'rgba(110,130,210,0.5)'; ctx.lineWidth=armed?2.5:1.5;
   rr(r.x,r.y,r.w,r.h,12); ctx.stroke();
-  txt(icon+' ×'+n,r.x+r.w/2,r.y+r.h/2+1,16,n>0?'#ffffff':'#5a5a72','center',800);
+  txt(icon+' ×'+n,r.x+r.w/2,r.y+r.h/2+1,16,n>0?'#3a3a5a':'#a0a0b8','center',800);
 }
 function drawTools(){
   toolBtn(toolHBtn,'🔨',tools.H,armedTool==='H');
   toolBtn(toolBBtn,'🌟',tools.B,armedTool==='B');
-  ctx.fillStyle='#33335e'; rr(hintBtn.x,hintBtn.y,hintBtn.w,hintBtn.h,12); ctx.fill();
-  ctx.strokeStyle='#4a4a6a'; ctx.lineWidth=1.5; rr(hintBtn.x,hintBtn.y,hintBtn.w,hintBtn.h,12); ctx.stroke();
-  txt('💡提示',hintBtn.x+hintBtn.w/2,hintBtn.y+hintBtn.h/2+1,14,'#d7dcff','center',700);
+  ctx.fillStyle='rgba(255,255,255,0.92)'; rr(hintBtn.x,hintBtn.y,hintBtn.w,hintBtn.h,12); ctx.fill();
+  ctx.strokeStyle='rgba(110,130,210,0.5)'; ctx.lineWidth=1.5; rr(hintBtn.x,hintBtn.y,hintBtn.w,hintBtn.h,12); ctx.stroke();
+  txt('💡提示',hintBtn.x+hintBtn.w/2,hintBtn.y+hintBtn.h/2+1,14,'#3a3a5a','center',700);
   if(armedTool){
     var a2=0.6+0.4*Math.sin(Date.now()/300);
     ctx.save(); ctx.globalAlpha=a2;
-    txt(armedTool==='H'?'点棋盘任意位置：锤爆 3×3':'点一只怪：清掉全场同类',W/2,hintBtn.y-16,13,'#ffb300','center',800);
+    txt(armedTool==='H'?'点棋盘任意位置：锤爆 3×3':'点一只怪：清掉全场同类',W/2,hintBtn.y-16,13,'#d97c00','center',800);
     ctx.restore();
   }
 }
@@ -873,7 +1023,7 @@ function drawHint(now){
   [p1,p2].forEach(function(p){ ctx.beginPath(); ctx.arc(p.x,p.y,cell*0.44,0,7); ctx.stroke(); });
   ctx.restore();
 }
-function dim(){ ctx.fillStyle='rgba(16,16,30,0.85)'; ctx.fillRect(0,0,W,H); }
+function dim(){ ctx.fillStyle='rgba(244,247,255,0.88)'; ctx.fillRect(0,0,W,H); }
 function button(r,label){
   var g=ctx.createLinearGradient(0,r.y,0,r.y+r.h);
   g.addColorStop(0,'#ffe082'); g.addColorStop(1,'#ffb300');
@@ -881,34 +1031,97 @@ function button(r,label){
   txt(spaced(label),r.x+r.w/2,r.y+r.h/2+1,21,'#1a1a1a','center',900);
 }
 
+function handlePauseTap(x,y){
+  if(pauseTab==='help'){ if(inRect(x,y,backBtn)) pauseTab='menu'; return; }
+  if(inRect(x,y,pHome)){
+    if(pauseConfirmHome){ paused=false; pauseTab='menu'; pauseConfirmHome=false; state='start'; }
+    else pauseConfirmHome=true;
+    return;
+  }
+  pauseConfirmHome=false;
+  if(inRect(x,y,pResume)) paused=false;
+  else if(inRect(x,y,pHelp)) pauseTab='help';
+  else if(inRect(x,y,pSound)){ soundOn=!soundOn; setPref('nkpi_sound',soundOn?'1':'0'); }
+  else if(inRect(x,y,pVib)){ vibOn=!vibOn; setPref('nkpi_vib',vibOn?'1':'0'); }
+  else if(inRect(x,y,pMotion)){ reduceMotion=!reduceMotion; setPref('nkpi_rm',reduceMotion?'1':'0'); }
+}
+function toggleRow(r,label,on){
+  ctx.fillStyle='rgba(240,243,255,0.9)'; rr(r.x,r.y,r.w,r.h,10); ctx.fill();
+  txt(label,r.x+14,r.y+r.h/2+1,15,'#3a3a5a','left',700);
+  txt(on?'开':'关',r.x+r.w-14,r.y+r.h/2+1,15,on?'#35c26e':'#9a9ab8','right',800);
+}
+function drawPause(){
+  dim();
+  if(pauseTab==='help'){ drawHelp(); return; }
+  var c=pauseCard;
+  ctx.fillStyle='rgba(255,255,255,0.97)'; rr(c.x,c.y,c.w,c.h,18); ctx.fill();
+  ctx.strokeStyle='rgba(110,130,210,0.4)'; ctx.lineWidth=1.5; rr(c.x,c.y,c.w,c.h,18); ctx.stroke();
+  txt('暂停',W/2,c.y+34,22,'#2b2b3d','center',900);
+  button(pResume,'继续');
+  button2(pHelp,'玩法说明');
+  toggleRow(pSound,'声音',soundOn);
+  toggleRow(pVib,'震动',vibOn);
+  toggleRow(pMotion,'减少动效',reduceMotion);
+  if(pauseConfirmHome) button(pHome,'确认返回？');
+  else button2(pHome,'返回首页');
+}
+function drawHelp(){
+  var bw2=Math.min(340,W*0.9), bx2=(W-bw2)/2, by2=92, bh2=530;
+  ctx.fillStyle='rgba(255,255,255,0.97)'; rr(bx2,by2,bw2,bh2,16); ctx.fill();
+  ctx.strokeStyle='rgba(110,130,210,0.4)'; ctx.lineWidth=1.5; rr(bx2,by2,bw2,bh2,16); ctx.stroke();
+  txt('玩法说明',W/2,by2+30,20,'#2b2b3d','center',900);
+  var y=by2+68;
+  for(var i=0;i<NTYPES;i++){
+    var im=SPR[SPRKEY[i]];
+    ctx.save(); rr(bx2+22,y-19,38,38,10); ctx.clip();
+    if(im) ctx.drawImage(im,bx2+22,y-19,38,38);
+    else { ctx.font='24px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(EMOJI[i],bx2+41,y); }
+    ctx.restore();
+    txt(PNAME[i]+' · 压力值 '+PRESSURE[i],bx2+72,y,14,'#3a3a5a','left',700);
+    y+=48;
+  }
+  var lines=['🔨 锤子：直线四连掉落，点击爆破 3×3','🌟 清色：直线五连掉落，与相邻棋子交换清一色','❄ 冰冻：冻住不能移动，凑三连先碎冰','↩ 无效交换会退回，不扣步数'];
+  for(var k=0;k<lines.length;k++){ txt(lines[k],bx2+22,y,13,'#3a3a5a','left',600); y+=28; }
+  button2(backBtn,'← 返回');
+}
+function drawPreview(){
+  if(!previewCell||!armedTool||phase!=='idle'||paused) return;
+  var p=cellXY(previewCell.r,previewCell.c);
+  ctx.save();
+  if(ctx.setLineDash) ctx.setLineDash([7,5]);
+  ctx.strokeStyle='#ff9f1c'; ctx.lineWidth=2.5;
+  if(armedTool==='H'){ var s2=cell*3; rr(p.x-s2/2,p.y-s2/2,s2,s2,10); ctx.stroke(); }
+  else { ctx.beginPath(); ctx.arc(p.x,p.y,cell*0.46,0,7); ctx.stroke(); }
+  ctx.restore();
+}
 function drawStart(){
   dim();
   var g=ctx.createLinearGradient(0,H*0.15,0,H*0.30);
   g.addColorStop(0,'#ffe082'); g.addColorStop(1,'#ff6f00');
   ctx.font='900 54px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
   ctx.fillStyle=g; ctx.fillText('怒砸KPI',W/2,H*0.15);
-  txt(spaced('三消宣泄版'),W/2,H*0.15+44,15,'#9fb0ff','center',700);
+  txt(spaced('三消宣泄版'),W/2,H*0.15+44,15,'#5a6ab8','center',700);
   var bw2=Math.min(350,W*0.86), bx2=(W-bw2)/2, by2=H*0.15+78;
-  ctx.fillStyle='#262648'; rr(bx2,by2,bw2,196,14); ctx.fill();
-  ctx.strokeStyle='#34345a'; ctx.lineWidth=1; rr(bx2,by2,bw2,196,14); ctx.stroke();
+  ctx.fillStyle='rgba(255,255,255,0.93)'; rr(bx2,by2,bw2,196,14); ctx.fill();
+  ctx.strokeStyle='rgba(110,130,210,0.4)'; ctx.lineWidth=1; rr(bx2,by2,bw2,196,14); ctx.stroke();
   var lines=['8×8 棋盘，滑动交换相邻两只','凑 3 连消，爆!连锁分数翻倍','🔨 4连掉锤子：点爆 3×3','🌟 5连掉老板炸弹：清一色','💥 压力值：房贷>KPI>甲方>周报·咖啡','30 步，无倒计时，慢慢刷分!'];
-  for(var i=0;i<lines.length;i++) txt(lines[i],W/2,by2+26+i*27,14,'#d7dcff','center',600);
+  for(var i=0;i<lines.length;i++) txt(lines[i],W/2,by2+26+i*27,14,'#4a4a6a','center',600);
   button(startBtn,'经典模式');
   button2(modeBtn,'📅 每日挑战');
   button2(levelsBtn,'📖 关卡模式');
-  txt('经典最佳 '+store.get()+' · 今日最佳 '+store.getDaily(),W/2,levelsBtn.y+levelsBtn.h+26,13,'#8a8aa8','center',600);
+  txt('经典最佳 '+store.get()+' · 今日最佳 '+store.getDaily(),W/2,levelsBtn.y+levelsBtn.h+26,13,'#9a9ab8','center',600);
 }
 
 function drawLevels(){
   dim();
-  txt('关卡选择',W/2,64,26,'#ffffff','center',900);
-  txt('每关一个特许规则：配额 · 冰冻 · 续命 · 风暴…',W/2,94,12.5,'#9fb0ff','center',600);
+  txt('关卡选择',W/2,64,26,'#2b2b3d','center',900);
+  txt('减压为王：把压力条清零就过关！',W/2,94,12.5,'#5a6ab8','center',600);
   var prog=loadProg(), un=prog.unlocked||1, stars=prog.stars||{};
   for(var i=0;i<LEVELS.length;i++){
     var r=levelRect(i), locked=i>=un;
-    ctx.fillStyle=locked?'#23233c':'#33335e'; rr(r.x,r.y,r.w,r.h,14); ctx.fill();
-    ctx.strokeStyle=locked?'#3a3a55':'#9fb0ff'; ctx.lineWidth=1.5; rr(r.x,r.y,r.w,r.h,14); ctx.stroke();
-    txt(locked?'🔒':String(i+1),r.x+r.w/2,r.y+22,locked?19:23,locked?'#5a5a72':'#ffffff','center',900);
+    ctx.fillStyle=locked?'rgba(228,230,244,0.9)':'rgba(255,255,255,0.95)'; rr(r.x,r.y,r.w,r.h,14); ctx.fill();
+    ctx.strokeStyle=locked?'rgba(160,165,200,0.5)':'#7a8fd0'; ctx.lineWidth=1.5; rr(r.x,r.y,r.w,r.h,14); ctx.stroke();
+    txt(locked?'🔒':String(i+1),r.x+r.w/2,r.y+22,locked?19:23,locked?'#a0a0b8':'#2b2b3d','center',900);
     var st=stars[i]||0, ss='';
     for(var k=0;k<st;k++) ss+='★';
     if(ss) txt(ss,r.x+r.w/2,r.y+46,11,'#ffd54a','center',700);
@@ -922,13 +1135,13 @@ function drawLevelEnd(){
     txt('过关!',W/2,H*0.14,26,'#69f0ae','center',900);
     ctx.font='44px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
     for(var i=0;i<3;i++){ ctx.fillStyle=i<st?'#ffd54a':'#3a3a52'; ctx.fillText(i<st?'★':'☆',W/2-52+i*52,H*0.14+52); }
-    txt(String(score),W/2,H*0.14+122,58,'#ffd54a','center',900);
-    txt('第'+(levelIdx+1)+'关 · '+curLevel.name,W/2,H*0.14+162,15,'#b9c0e8','center',600);
+    txt(String(score),W/2,H*0.14+122,58,'#f0a000','center',900);
+    txt('第'+(levelIdx+1)+'关 · '+curLevel.name,W/2,H*0.14+162,15,'#8a8ab0','center',600);
     button(againBtn, levelIdx<LEVELS.length-1?'下一关':'重玩本关');
     button2(shareBtn,'📤 分享战绩');
   } else {
     txt('就差一点!',W/2,H*0.14,26,'#ff8a80','center',900);
-    var pg=curLevel.kind==='score'?('分数 '+score+' / 目标 '+curLevel.v):(PNAME[curLevel.t]+' 已消 '+collected+' / '+curLevel.n);
+    var pg='剩余压力 '+levelPressure+' / 本局 '+score+' 分';
     txt(pg,W/2,H*0.14+56,17,'#d7dcff','center',700);
     txt('第'+(levelIdx+1)+'关 · '+curLevel.name,W/2,H*0.14+88,14,'#8a8aa8','center',600);
     button(againBtn,'再试一次');
@@ -939,13 +1152,13 @@ function drawEnd(){
   dim();
   if(mode==='level'){ drawLevelEnd(); return; }
   var stars=score>=10000?3:score>=6500?2:score>=3000?1:0;
-  txt(mode==='daily'?'今日挑战结束!':'对局结束!',W/2,H*0.14,20,'#9fb0ff','center',800);
+  txt(mode==='daily'?'今日挑战结束!':'对局结束!',W/2,H*0.14,20,'#5a6ab8','center',800);
   ctx.font='44px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
   for(var i=0;i<3;i++){ ctx.fillStyle=i<stars?'#ffd54a':'#3a3a52';
     ctx.fillText(i<stars?'★':'☆',W/2-52+i*52,H*0.14+52); }
-  txt(String(score),W/2,H*0.14+122,62,'#ffd54a','center',900);
+  txt(String(score),W/2,H*0.14+122,62,'#f0a000','center',900);
   var best=mode==='daily'?store.getDaily():store.get();
-  txt((mode==='daily'?'今日':'历史')+'最佳 '+Math.max(best,score),W/2,H*0.14+164,15,'#b9c0e8','center',600);
+  txt((mode==='daily'?'今日':'历史')+'最佳 '+Math.max(best,score),W/2,H*0.14+164,15,'#8a8ab0','center',600);
   var rec='';
   if(score>best&&best>0) rec='🎉 新纪录!';
   else if(best>0&&score<best&&best-score<=500) rec='就差 '+(best-score)+' 分破纪录!不服?';
@@ -961,13 +1174,10 @@ function draw(now){
   ctx.save();
   if(shakeT>0) ctx.translate((Math.random()-0.5)*10,(Math.random()-0.5)*10);
   if(state==='playing'){
-    drawHUD(); drawBoard(); drawTools(); drawHint(now); drawParts();
+    drawHUD(); drawBoard(); drawTools(); drawHint(now); drawPreview(); drawParts();
     drawRings(now); drawHammers(now); drawBigTexts(now); drawFlash();
-    if(!tutDone){
-      ctx.save(); ctx.globalAlpha=0.6+0.4*Math.sin(now/300);
-      txt('👆 滑动交换相邻两只，凑 3 个消掉!',W/2,by-16,15,'#ffd54a','center',800);
-      ctx.restore();
-    }
+    if(mode==='tutorial') button2(skipBtn,'跳过引导');
+    if(paused) drawPause();
   } else if(state==='start'){
     drawStart();
   } else if(state==='levels'){
@@ -982,6 +1192,10 @@ function draw(now){
 var last=Date.now();
 function loop(){
   var now=Date.now(), dt=Math.min(0.05,(now-last)/1000); last=now;
+  if(pendingPause&&phase==='idle'&&state==='playing'&&!paused){
+    paused=true; pendingPause=false; pauseTab='menu'; pauseConfirmHome=false;
+  }
+  if(paused){ draw(now); requestAnimationFrame(loop); return; }
   var r,c;
   var k=Math.min(1,dt*13);
   for(r=0;r<ROWS;r++) for(c=0;c<COLS;c++){
@@ -1011,5 +1225,9 @@ try{
   wx.onWindowResize(function(){ try{ var s=wx.getWindowInfo(); W=s.windowWidth; H=s.windowHeight; DPR=s.pixelRatio||2; }catch(e){} layout(); });
 }catch(e){}
 requestAnimationFrame(loop);
+
+
+
+
 
 })();
