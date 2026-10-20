@@ -12,7 +12,7 @@ var ctx=canvas.getContext('2d');
 var sys={}; try{ sys=wx.getWindowInfo(); }catch(e){ try{ sys=wx.getSystemInfoSync(); }catch(_){} }
 var DPR=sys.pixelRatio||2, W=sys.windowWidth||390, H=sys.windowHeight||844;
 
-var ROWS=8, COLS=8, NTYPES=5, MOVES=30;
+var ROWS=8, COLS=8, NTYPES=5, MOVES=30, CLASSIC_TARGET=6000;
 var SPRKEY=['kpi','zhoubao','jiafang','fangdai','kafei'];
 var EMOJI=['📊','📝','👔','🏠','☕'];
 /* 压力值：房贷5 > KPI3 > 甲方2 > 周报1 = 咖啡1 */
@@ -943,6 +943,13 @@ function drawHUD(){
   ctx.strokeStyle='rgba(110,130,210,0.5)'; ctx.lineWidth=1.5; rr(pauseBtn.x,pauseBtn.y,pauseBtn.w,pauseBtn.h,12); ctx.stroke();
   txt('⏸',pauseBtn.x+pauseBtn.w/2,pauseBtn.y+pauseBtn.h/2+1,17,'#3a4a8a','center',700);
   if(mode==='daily') txt(dailyPractice?'· 练习 ·':'📅 今日挑战',W/2,20,13,'#5a6ab8','center',700);
+  if(mode==='classic'){
+    var okT=score>=CLASSIC_TARGET;
+    txt(okT?'✅ 已达标 '+CLASSIC_TARGET:'🎯 目标 '+CLASSIC_TARGET,W/2,24,13,okT?'#1f9d55':'#c2410c','center',800);
+    var gw=110, gx=W/2-gw/2, gr=Math.min(1,score/CLASSIC_TARGET);
+    ctx.fillStyle='rgba(120,130,180,0.25)'; rr(gx,38,gw,8,4); ctx.fill();
+    if(gr>0){ ctx.fillStyle=okT?'#35c26e':'#ff9f1c'; rr(gx,38,Math.max(8,gw*gr),8,4); ctx.fill(); }
+  }
   if(mode==='level'&&curLevel){
     var pw=120, px=W/2-pw/2+8;
     txt('😮‍💨',px-16,32,15,'#7a7ab8','center',700);
@@ -1267,7 +1274,7 @@ function drawStart(){
   var bw2=Math.min(350,W*0.86), bx2=(W-bw2)/2, by2=H*0.15+78;
   ctx.fillStyle='rgba(255,255,255,0.93)'; rr(bx2,by2,bw2,196,14); ctx.fill();
   ctx.strokeStyle='rgba(110,130,210,0.4)'; ctx.lineWidth=1; rr(bx2,by2,bw2,196,14); ctx.stroke();
-  var lines=['8×8 棋盘，滑动交换相邻两只','凑 3 连消，爆!连锁分数翻倍','🔨 4连掉锤子：点爆 3×3','🌟 5连掉老板炸弹：清一色','💥 压力值：房贷>KPI>甲方>周报·咖啡','30 步，无倒计时，慢慢刷分!'];
+  var lines=['8×8 棋盘，滑动交换相邻两只','凑 3 连消，爆!连锁分数翻倍','🔨 4连掉锤子：点爆 3×3','🌟 5连掉老板炸弹：清一色','💥 压力值：房贷>KPI>甲方>周报·咖啡','30 步内拿到 '+CLASSIC_TARGET+' 分，否则被优化!'];
   for(var i=0;i<lines.length;i++) txt(lines[i],W/2,by2+26+i*27,14,'#4a4a6a','center',600);
   button(startBtn,'经典模式');
   button2(modeBtn,'📅 每日挑战');
@@ -1314,8 +1321,10 @@ function drawLevelEnd(){
 function drawEnd(){
   dim();
   if(mode==='level'){ drawLevelEnd(); return; }
-  var stars=score>=10000?3:score>=6500?2:score>=3000?1:0;
-  txt(mode==='daily'?'今日挑战结束!':'对局结束!',W/2,H*0.14,20,'#5a6ab8','center',800);
+  var classicFail=mode==='classic'&&score<CLASSIC_TARGET;
+  var stars=mode==='classic'?(score>=12000?3:score>=9000?2:score>=CLASSIC_TARGET?1:0)
+                            :(score>=10000?3:score>=6500?2:score>=3000?1:0);
+  txt(mode==='daily'?'今日挑战结束!':classicFail?'没达到 '+CLASSIC_TARGET+' 分…':'达标下班!',W/2,H*0.14,20,classicFail?'#e5484d':'#5a6ab8','center',800);
   ctx.font='44px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
   for(var i=0;i<3;i++){ ctx.fillStyle=i<stars?'#ffd54a':'#3a3a52';
     ctx.fillText(i<stars?'★':'☆',W/2-52+i*52,H*0.14+52); }
@@ -1326,7 +1335,8 @@ function drawEnd(){
   if(score>best&&best>0) rec='🎉 新纪录!';
   else if(best>0&&score<best&&best-score<=500) rec='就差 '+(best-score)+' 分破纪录!不服?';
   if(rec) txt(rec,W/2,H*0.14+190,15,'#69f0ae','center',800);
-  var msg=stars>=3?'🏆 传奇打工人!':stars===2?'🔥 甲方已被你拿下!':stars===1?'💪 初露锋芒!':'😅 多练练，手感会来的!';
+  var msg=classicFail?'💼 你被优化了!再来一局翻身!':stars>=3?
+'🏆 传奇打工人!':stars===2?'🔥 甲方已被你拿下!':stars===1?'💪 初露锋芒!':'😅 多练练，手感会来的!';
   txt(msg,W/2,H*0.14+216,18,'#ff8a80','center',800);
   button(againBtn,'再来一局');
   button2(shareBtn,'📤 分享战绩');
