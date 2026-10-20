@@ -308,15 +308,30 @@ function newBoard(){
 
 function shuffleBoard(){
   var pool=[], r, c;
-  for(r=0;r<ROWS;r++) for(c=0;c<COLS;c++){ var t=board[r][c]; if(t&&!isSpecial(t)) pool.push(t.t); }
+  for(r=0;r<ROWS;r++) for(c=0;c<COLS;c++){ var t=board[r][c]; if(t&&!isSpecial(t)&&!t.ice) pool.push(t.t); }
   var guard=0, ok=false;
   while(!ok&&guard<200){
     guard++;
     for(var i=pool.length-1;i>0;i--){ var j=(RND()*(i+1))|0, tmp=pool[i]; pool[i]=pool[j]; pool[j]=tmp; }
     var k=0;
-    for(r=0;r<ROWS;r++) for(c=0;c<COLS;c++){ var t2=board[r][c]; if(t2&&!isSpecial(t2)) t2.t=pool[k++]; }
+    for(r=0;r<ROWS;r++) for(c=0;c<COLS;c++){ var t2=board[r][c]; if(t2&&!isSpecial(t2)&&!t2.ice) t2.t=pool[k++]; }
     ok=findMatches().cells.length===0&&hasValidMove();
   }
+  if(!ok){
+    /* 兜底：重开棋盘，并恢复关卡冰冻格数量 */
+    var nIce=0;
+    for(r=0;r<ROWS;r++) for(c=0;c<COLS;c++) if(board[r][c]&&board[r][c].ice) nIce++;
+    newBoard();
+    var g2=0;
+    while(nIce>0&&g2<300){ g2++; var ir=(RND()*ROWS)|0, ic=(RND()*COLS)|0; if(!board[ir][ic].ice){ board[ir][ic].ice=1; nIce--; } }
+  }
+}
+/* 洗牌后若仍有现成三连，进入下落结算自动消除（不额外扣步） */
+function reshuffle(){
+  shuffleBoard();
+  bigTexts.push({text:'无路可走，洗牌!',color:'#9fb0ff',t0:Date.now()});
+  if(findMatches().cells.length){ pendingFree=true; phase='fall'; return true; }
+  return false;
 }
 
 /* ============ 特效 ============ */
@@ -593,11 +608,8 @@ function endMove(){
     if(targetMet()){ levelEnd(true); return; }
     if(moves<=0){ levelEnd(false); return; }
   } else if(moves<=0){ endGame(); return; }
-  if(!hasValidMove()){
-    shuffleBoard();
-    bigTexts.push({text:'无路可走，洗牌!',color:'#9fb0ff',t0:Date.now()});
-  }
   phase='idle';
+  if(!hasValidMove()) reshuffle();
 }
 
 /* 消除单格普通棋子（返回是否消除） */
@@ -698,7 +710,8 @@ function showHint(){
   if(phase!=='idle'||state!=='playing') return;
   var h=findHint();
   if(h){ hintCells=h; hintT=Date.now(); sSelect(); }
-  else { shuffleBoard(); bigTexts.push({text:'无路可走，洗牌!',color:'#9fb0ff',t0:Date.now()}); }
+  else reshuffle();
+
 }
 function activateSpecial(r,c){
   if(phase!=='idle'||state!=='playing') return;
