@@ -31,7 +31,7 @@ var LEVELS=[
   {name:'连锁风暴', moves:26, pressure:100, cascadeDouble:true, stars:[4500,8000,13000]},
   {name:'终极述职', moves:30, pressure:120, stressType:3, frozen:6, weights:[2,2,2,5,2], stars:[6000,10000,16000]}
 ];
-var curLevel=null, levelIdx=0, collected=0, endWin=false;
+var curLevel=null, levelIdx=0, collected=0, endWin=false, finalDone=false;
 function relieve(n){ if(mode==='level'&&curLevel){ levelPressure=Math.max(0,levelPressure-n); } }
 function stressBonus(t){ return (curLevel&&curLevel.stressType===t)?1:0; }
 
@@ -450,7 +450,7 @@ function startGame(m,li){
       try{ wx.setStorageSync('nkpi_daily_done',String(_seed)); }catch(e){}
     }
   }
-  state='playing'; score=0; cascade=0; collected=0; endWin=false;
+  state='playing'; score=0; cascade=0; collected=0; endWin=false; finalDone=false;
   moves=curLevel?curLevel.moves:MOVES;
   if(curLevel){ levelPressure=curLevel.pressure; levelPressureMax=curLevel.pressure; }
   parts=[]; popups=[]; hammers=[]; rings=[]; bigTexts=[];
@@ -632,10 +632,17 @@ function endMove(){
   if(pendingFree) pendingFree=false; else moves--;
   cascade=0; lastFocus=null; selTile=null;
   if(mode==='tutorial'){ tutAdvance(); return; }
+  if(mode==='level'&&targetMet()){ levelEnd(true); return; }
+  /* 收官：步数用尽时自动引爆剩余特殊棋子，结算奖励分 */
+  if(moves<=0&&!finalDone){
+    finalDone=true;
+    if(finalBlast()) return;
+  }
   if(mode==='level'){
     if(targetMet()){ levelEnd(true); return; }
     if(moves<=0){ levelEnd(false); return; }
   } else if(moves<=0){ endGame(); return; }
+  if(moves===1) bigTexts.push({text:'最后一步!',color:'#ff5a5a',t0:Date.now()});
   phase='idle';
   if(!hasValidMove()) reshuffle();
 }
@@ -683,7 +690,20 @@ function smashAt(r,c,rad){
   addPopup(p.x,p.y-cell,'锤爆 '+sz+'×'+sz+'!','#ff9f1c',20);
   phase='pop'; phaseT=0.36;
 }
+function finalBlast(){
+  var now=Date.now(), list=[], i, j;
+  for(i=0;i<ROWS;i++) for(j=0;j<COLS;j++){ var t=board[i][j]; if(t&&!t.pop&&isSpecial(t)) list.push([i,j]); }
+  if(!list.length) return false;
+  var bonus=list.length*200;
+  for(i=0;i<list.length;i++) detonate(list[i][0],list[i][1],now);
+  score+=bonus; cascade=0; lastFocus=null;
+  bigTexts.push({text:'收官引爆! +'+bonus,color:'#ffd54a',t0:now});
+  flashA=0.3; shakeT=0.25; sSmash(); vibrate();
+  pendingFree=true; phase='pop'; phaseT=0.5;
+  return true;
+}
 /* 特殊+特殊 组合 */
+
 function comboSwap(a,b,r,c){
   var now=Date.now(), p=cellXY(r,c), i, j;
   a.pop=now; b.pop=now; lastFocus={r:r,c:c}; cascade=0;
