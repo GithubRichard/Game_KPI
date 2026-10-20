@@ -274,6 +274,11 @@ function findHint(){
       if(hit) return {a:{r:r,c:c},b:{r:r2,c:c2}};
     }
   }
+  /* 无普通交换时：任何特殊棋子都可点击引爆 */
+  for(var r3=0;r3<ROWS;r3++) for(var c3=0;c3<COLS;c3++){
+    var s3=board[r3][c3];
+    if(s3&&!s3.pop&&isSpecial(s3)) return {a:{r:r3,c:c3},b:{r:r3,c:c3}};
+  }
   return null;
 }
 function hasValidMove(){ return !!findHint(); }
@@ -427,14 +432,15 @@ function trySwap(r1,c1,r2,c2){
   if(!a||!b) return;
   if(a.ice||b.ice){ sDeny(); return; }
   /* 清色棋子：与相邻普通棋子交换 → 清除该类（文档§3），耗1步 */
-  var bomb=null, other=null;
+  var bomb=null, other=null, combo=false;
   if(a.t==='B'&&!isSpecial(b)){ bomb=a; other=b; }
   else if(b.t==='B'&&!isSpecial(a)){ bomb=b; other=a; }
+  else if(isSpecial(a)&&isSpecial(b)) combo=true;
   else if(isSpecial(a)||isSpecial(b)){ sDeny(); return; }
   board[r1][c1]=b; board[r2][c2]=a;
   var p1=cellXY(r1,c1), p2=cellXY(r2,c2);
   a.tx=p2.x; a.ty=p2.y; b.tx=p1.x; b.ty=p1.y;
-  pend={a:a,b:b,r1:r1,c1:c1,r2:r2,c2:c2,clearSwap:bomb?{bomb:bomb,other:other}:null};
+  pend={a:a,b:b,r1:r1,c1:c1,r2:r2,c2:c2,clearSwap:bomb?{bomb:bomb,other:other}:null,combo:combo};
   lastFocus={r:r2,c:c2}; lastSwapStart={r:r1,c:c1};
   cascade=0;
   phase='swap'; phaseT=0.16; sSwap();
@@ -442,6 +448,7 @@ function trySwap(r1,c1,r2,c2){
 
 function afterSwap(){
   var p=pend; pend=null;
+  if(p.combo){ vibrate(); comboSwap(p.a,p.b,p.r2,p.c2); return; }
   if(p.clearSwap){
     var cs=p.clearSwap;
     cs.bomb.pop=Date.now();
@@ -593,31 +600,81 @@ function endMove(){
   phase='idle';
 }
 
-function smashAt(r,c){
+/* 消除单格普通棋子（返回是否消除） */
+function popCell(r,c,now,big){
+  var t=tileAt(r,c);
+  if(!t||t.pop||isSpecial(t)) return false;
+  t.pop=now; score+=PRESSURE[t.t]*10; relieve(1+stressBonus(t.t));
+  var q=cellXY(r,c); burst(q.x,q.y,!!big,big?3:2);
+  return true;
+}
+/* 范围爆破：rad=1 即 3×3；范围内的特殊棋子连锁引爆 */
+function blastArea(r,c,rad,now){
+  for(var dr=-rad;dr<=rad;dr++) for(var dc=-rad;dc<=rad;dc++){
+    var rr2=r+dr, cc2=c+dc, t2=tileAt(rr2,cc2);
+    if(!t2||t2.pop) continue;
+    if(isSpecial(t2)) detonate(rr2,cc2,now);
+    else popCell(rr2,cc2,now,true);
+  }
+}
+/* 引爆一个特殊棋子（连锁用） */
+function detonate(r,c,now){
+  var t=tileAt(r,c); if(!t||t.pop||!isSpecial(t)) return;
+  t.pop=now;
+  var p=cellXY(r,c);
+  if(t.t==='H'){ hammers.push({x:p.x,y:p.y,t0:now}); rings.push({x:p.x,y:p.y,t0:now,big:true,color:'#ff9f1c'}); blastArea(r,c,1,now); }
+  else { clearTypeCells(mostCommonType(),now); rings.push({x:p.x,y:p.y,t0:now,big:true,color:'#ffd54a'}); }
+}
+function smashAt(r,c,rad){
+  rad=rad||1;
   var now=Date.now(), p=cellXY(r,c);
   if(mode==='tutorial') tutHammerUsed=true;
   lastFocus={r:r,c:c}; cascade=0;
   var tc=tileAt(r,c);
-  if(tc&&isSpecial(tc)) tc.pop=now;
-  for(var dr=-1;dr<=1;dr++) for(var dc=-1;dc<=1;dc++){
-    var t2=tileAt(r+dr,c+dc);
-    if(t2&&!t2.pop&&!isSpecial(t2)){ t2.pop=now; score+=PRESSURE[t2.t]*10; relieve(1+stressBonus(t2.t)); var q=cellXY(r+dr,c+dc); burst(q.x,q.y,true,3); }
-  }
+  if(tc&&isSpecial(tc)&&!tc.pop) tc.pop=now;
+  blastArea(r,c,rad,now);
   hammers.push({x:p.x,y:p.y,t0:now});
   rings.push({x:p.x,y:p.y,t0:now,big:true,color:'#ff9f1c'});
   shakeT=0.22; sSmash(); vibrate();
-  addPopup(p.x,p.y-cell,'锤爆 3×3!','#ff9f1c',20);
+  var sz=rad*2+1;
+  addPopup(p.x,p.y-cell,'锤爆 '+sz+'×'+sz+'!','#ff9f1c',20);
   phase='pop'; phaseT=0.36;
+}
+/* 特殊+特殊 组合 */
+function comboSwap(a,b,r,c){
+  var now=Date.now(), p=cellXY(r,c), i, j;
+  a.pop=now; b.pop=now; lastFocus={r:r,c:c}; cascade=0;
+  if(a.t==='H'&&b.t==='H'){
+    smashAt(r,c,2);
+    bigTexts.push({text:'双锤 5×5!',color:'#ff9f1c',t0:now});
+    return;
+  }
+  if(a.t==='B'&&b.t==='B'){
+    for(i=0;i<ROWS;i++) for(j=0;j<COLS;j++){ var v=board[i][j]; if(v&&!v.pop){ if(isSpecial(v)) v.pop=now; else popCell(i,j,now,false); } }
+    flashA=0.4; shakeT=0.3; sSmash(); vibrate();
+    bigTexts.push({text:'老板×老板 全屏清场!',color:'#ffd54a',t0:now});
+    phase='pop'; phaseT=0.36; return;
+  }
+  /* 锤子+清色：最多的一类全变锤子并引爆 */
+  var tp=mostCommonType(), hs=[];
+  for(i=0;i<ROWS;i++) for(j=0;j<COLS;j++){ var u=board[i][j]; if(u&&!u.pop&&!isSpecial(u)&&!u.ice&&u.t===tp){ u.t='H'; hs.push([i,j]); } }
+  for(i=0;i<hs.length;i++) detonate(hs[i][0],hs[i][1],now);
+  flashA=0.35; shakeT=0.3; sSmash(); vibrate();
+  bigTexts.push({text:PNAME[tp]+'全变锤子! ×'+hs.length,color:'#ff9f1c',t0:now});
+  phase='pop'; phaseT=0.36;
+}
+function clearTypeCells(tp,now){
+  var n=0;
+  for(var r=0;r<ROWS;r++) for(var c=0;c<COLS;c++){
+    var v=board[r][c];
+    if(v&&!v.pop&&!isSpecial(v)&&v.t===tp&&popCell(r,c,now,false)) n++;
+  }
+  return n;
 }
 function clearType(tp,label){
   var now=Date.now();
   lastFocus=null; cascade=0;
-  var n=0;
-  for(var r=0;r<ROWS;r++) for(var c=0;c<COLS;c++){
-    var v=board[r][c];
-    if(v&&!v.pop&&!isSpecial(v)&&v.t===tp){ v.pop=now; score+=PRESSURE[v.t]*10; relieve(1+stressBonus(v.t)); n++;
-      var w=cellXY(r,c); burst(w.x,w.y,false,2); }
-  }
+  var n=clearTypeCells(tp,now);
   flashA=0.30; shakeT=0.25;
   bigTexts.push({text:(label||PNAME[tp]+'清场!')+' ×'+n,color:'#ffd54a',t0:now});
   sSmash(); tone(880,1320,0.3,'triangle',0.15,0.05);
@@ -649,7 +706,8 @@ function activateSpecial(r,c){
   if(!t||!isSpecial(t)) return;
   if(mode==='tutorial') tutHammerUsed=true;
   if(t.t==='H') smashAt(r,c);
-  else { t.pop=Date.now(); clearType(mostCommonType(),'老板清场!'); }
+  else { t.pop=Date.now(); clearType(mostCommonType()); }
+
 }
 function shareScore(){
   try{
