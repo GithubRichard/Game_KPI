@@ -1135,15 +1135,37 @@ function drawTools(){
   }
 }
 function drawHint(now){
-  if(!hintCells||(now-hintT>2200&&hintT<=now+1)) return;
-
+  if(!hintCells||(now-hintT>3000&&hintT<=now+1)) return;
   var p1=cellXY(hintCells.a.r,hintCells.a.c), p2=cellXY(hintCells.b.r,hintCells.b.c);
+  var pulse=0.5+0.5*Math.sin(now/160);
   ctx.save();
-  ctx.globalAlpha=0.45+0.45*Math.sin(now/180);
-  ctx.strokeStyle='#69f0ae'; ctx.lineWidth=3.5;
-  [p1,p2].forEach(function(p){ ctx.beginPath(); ctx.arc(p.x,p.y,cell*0.44,0,7); ctx.stroke(); });
+  /* 整格高亮 */
+  [p1,p2].forEach(function(p){
+    ctx.fillStyle='rgba(105,240,174,'+(0.25+0.25*pulse).toFixed(3)+')';
+    rr(p.x-cell/2+1,p.y-cell/2+1,cell-2,cell-2,10); ctx.fill();
+    ctx.strokeStyle='#18b56a'; ctx.lineWidth=3;
+    rr(p.x-cell/2+1,p.y-cell/2+1,cell-2,cell-2,10); ctx.stroke();
+  });
+  /* 方向箭头：a → b */
+  if(p1.x!==p2.x||p1.y!==p2.y){
+    var dx=p2.x-p1.x, dy=p2.y-p1.y, L=Math.sqrt(dx*dx+dy*dy), ux=dx/L, uy=dy/L;
+    var off=cell*0.12*pulse, sx=p1.x+ux*off, sy=p1.y+uy*off, ex=p2.x-ux*cell*0.15+ux*off, ey=p2.y-uy*cell*0.15+uy*off;
+    ctx.strokeStyle='#ffffff'; ctx.lineWidth=7; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(ex,ey); ctx.stroke();
+    ctx.strokeStyle='#0f9d58'; ctx.lineWidth=4;
+    ctx.beginPath(); ctx.moveTo(sx,sy); ctx.lineTo(ex,ey); ctx.stroke();
+    var ah=cell*0.22;
+    ctx.fillStyle='#0f9d58';
+    ctx.beginPath(); ctx.moveTo(ex+ux*ah*0.6,ey+uy*ah*0.6);
+    ctx.lineTo(ex-uy*ah*0.6-ux*ah*0.4,ey+ux*ah*0.6-uy*ah*0.4);
+    ctx.lineTo(ex+uy*ah*0.6-ux*ah*0.4,ey-ux*ah*0.6-uy*ah*0.4);
+    ctx.closePath(); ctx.fill();
+  } else {
+    txt('点我!',p1.x,p1.y-cell*0.62,13,'#0f9d58','center',900);
+  }
   ctx.restore();
 }
+
 function dim(){ ctx.fillStyle='rgba(244,247,255,0.88)'; ctx.fillRect(0,0,W,H); }
 function button(r,label){
   var g=ctx.createLinearGradient(0,r.y,0,r.y+r.h);
