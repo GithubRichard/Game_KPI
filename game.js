@@ -998,8 +998,14 @@ function drawTile(t){
     ctx.save(); rr(-s/2,-s/2,s,s,12); ctx.clip();
     if(im) ctx.drawImage(im,-s/2,-s/2,s,s);
     else { ctx.font=(s*0.55)+'px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
-           ctx.fillText(EMOJI[t.t],0,2); }
+           ctx.fillText(EMOJI[t.t],0,-s*0.06); }
+    /* 主题名小标签 */
+    var fs=Math.max(8,Math.round(s*0.2));
+    ctx.fillStyle='rgba(30,30,60,0.55)'; ctx.fillRect(-s/2,s/2-fs-4,s,fs+4);
+    ctx.font='800 '+fs+'px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    ctx.fillStyle='#ffffff'; ctx.fillText(PNAME[t.t],0,s/2-fs/2-2);
     ctx.restore();
+
   }
   /* 立体感：顶部高光泽面 + 描边提亮 */
   ctx.save(); rr(-s/2,-s/2,s,s,12); ctx.clip();
