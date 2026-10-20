@@ -142,6 +142,12 @@ function layout(){
   var bw=cell*COLS;
   bx=(W-bw)/2; by=hudH+8;
   makeBG();
+  /* 尺寸变化后重算棋子坐标 */
+  for(var r0=0;r0<ROWS;r0++) for(var c0=0;c0<COLS;c0++){
+    var t0=board[r0]&&board[r0][c0];
+    if(t0){ var q=cellXY(r0,c0); t0.tx=q.x; t0.ty=q.y; t0.x=q.x; t0.y=q.y; }
+  }
+
   var btw=Math.min(240,W*0.62), bth=58;
   startBtn={x:(W-btw)/2,y:H*0.58,w:btw,h:bth};
   modeBtn={x:(W-btw)/2,y:H*0.58+bth+8,w:btw,h:48};
