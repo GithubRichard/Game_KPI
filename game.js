@@ -371,11 +371,14 @@ function tutAdvance(){
       tutStep=2; tools={H:1,B:1}; hintCells=null;
       tutText='点 🔨 道具，再点棋盘任意处！';
     } else {
-      tutText='点一下发光的特殊棋子，试试爆破！';
+      var found=false;
       for(var r=0;r<ROWS;r++) for(var c=0;c<COLS;c++){
         var t=board[r][c];
-        if(t&&isSpecial(t)&&!t.pop){ hintCells={a:{r:r,c:c},b:{r:r,c:c}}; hintT=Date.now()+1e9; }
+        if(t&&isSpecial(t)&&!t.pop){ found=true; hintCells={a:{r:r,c:c},b:{r:r,c:c}}; hintT=Date.now()+1e9; }
       }
+      if(found) tutText='点一下发光的特殊棋子，试试爆破！';
+      else { setupTutBoard(1); tutText='没凑出四连，再试一次：把发光的格子往上滑'; }
+
     }
   } else if(tutStep===2){
     if(tutToolUsed) finishTutorial();
