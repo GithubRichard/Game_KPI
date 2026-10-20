@@ -67,12 +67,23 @@ var levelsBtn={x:0,y:0,w:0,h:0}, backBtn={x:0,y:0,w:0,h:0};
 var toolHBtn={x:0,y:0,w:0,h:0}, toolBBtn={x:0,y:0,w:0,h:0}, hintBtn={x:0,y:0,w:0,h:0};
 var SPR={};
 
+/* 存档读取做内存缓存，避免每帧同步读 storage */
 var store={
-  _m:0,
-  get:function(){ try{ var v=wx.getStorageSync('nkpi_best'); return parseInt(v||'0',10)||0; }catch(e){ return this._m; } },
+  _m:null, _d:null, _dd:null,
+  get:function(){
+    if(this._m===null){ this._m=0; try{ this._m=parseInt(wx.getStorageSync('nkpi_best')||'0',10)||0; }catch(e){} }
+    return this._m;
+  },
   set:function(v){ this._m=v; try{ wx.setStorageSync('nkpi_best', String(v)); }catch(e){} },
-  getDaily:function(){ try{ var d=wx.getStorageSync('nkpi_daily_date'); if(String(d)===String(beijingSeed())) return parseInt(wx.getStorageSync('nkpi_daily_best')||'0',10)||0; }catch(e){} return 0; },
-  setDaily:function(v){ try{ wx.setStorageSync('nkpi_daily_date',String(beijingSeed())); wx.setStorageSync('nkpi_daily_best',String(v)); }catch(e){} }
+  getDaily:function(){
+    var seed=String(beijingSeed());
+    if(this._dd!==seed){
+      this._dd=seed; this._d=0;
+      try{ if(String(wx.getStorageSync('nkpi_daily_date'))===seed) this._d=parseInt(wx.getStorageSync('nkpi_daily_best')||'0',10)||0; }catch(e){}
+    }
+    return this._d;
+  },
+  setDaily:function(v){ this._dd=String(beijingSeed()); this._d=v; try{ wx.setStorageSync('nkpi_daily_date',this._dd); wx.setStorageSync('nkpi_daily_best',String(v)); }catch(e){} }
 };
 
 /* ============ 音频（WebAudio 合成，无资源） ============ */
@@ -155,7 +166,9 @@ function layout(){
 }
 function makeBG(){
   try{
-    bg=wx.createCanvas(); bg.width=Math.round(W*DPR); bg.height=Math.round(H*DPR);
+    if(!bg) bg=wx.createCanvas();
+    bg.width=Math.round(W*DPR); bg.height=Math.round(H*DPR);
+
     var b=bg.getContext('2d'); b.setTransform(DPR,0,0,DPR,0,0);
     var g=b.createRadialGradient(W/2,0,10,W/2,0,H*0.75);
     g.addColorStop(0,'#e6efff'); g.addColorStop(1,'#fdf6e8');
@@ -209,8 +222,12 @@ function loadSprites(){
 
 /* ============ 棋盘模型 ============ */
 function mkTile(t){ return {t:t,x:0,y:0,tx:0,ty:0,pop:0,ice:0}; }
-function loadProg(){ try{ var p=JSON.parse(wx.getStorageSync('nkpi_prog')||'{}'); return (p&&typeof p==='object')?p:{}; }catch(e){ return {}; } }
-function saveProg(p){ try{ wx.setStorageSync('nkpi_prog',JSON.stringify(p)); }catch(e){} }
+var _prog=null;
+function loadProg(){
+  if(!_prog){ try{ var p=JSON.parse(wx.getStorageSync('nkpi_prog')||'{}'); _prog=(p&&typeof p==='object')?p:{}; }catch(e){ _prog={}; } }
+  return _prog;
+}
+function saveProg(p){ _prog=p; try{ wx.setStorageSync('nkpi_prog',JSON.stringify(p)); }catch(e){} }
 function levelRect(i){
   var cols=4, s=64, gap=14;
   var x0=(W-(cols*s+(cols-1)*gap))/2, y0=120;
