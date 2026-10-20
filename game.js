@@ -616,7 +616,10 @@ function endMove(){
 function popCell(r,c,now,big){
   var t=tileAt(r,c);
   if(!t||t.pop||isSpecial(t)) return false;
-  t.pop=now; score+=PRESSURE[t.t]*10; relieve(1+stressBonus(t.t));
+  var q0=cellXY(r,c);
+  if(t.ice){ t.ice--; score+=5; rings.push({x:q0.x,y:q0.y,t0:now,big:false,color:'#9fd8ff'}); burst(q0.x,q0.y,false,1); return false; }
+  t.pop=now;
+ score+=PRESSURE[t.t]*10; relieve(1+stressBonus(t.t));
   var q=cellXY(r,c); burst(q.x,q.y,!!big,big?3:2);
   return true;
 }
