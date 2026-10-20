@@ -79,7 +79,8 @@ var store={
 var actx=null;
 function ensureAudio(){
   if(actx) return actx;
-  try{ if(wx.createWebAudioContext){ actx=wx.createWebAudioContext().context; } }catch(e){}
+  try{ if(wx.createWebAudioContext){ var _w=wx.createWebAudioContext(); actx=(_w&&_w.createOscillator)?_w:(_w&&_w.context)||null;
+ } }catch(e){}
   try{ if(actx&&actx.resume) actx.resume(); }catch(e){}
   return actx;
 }
