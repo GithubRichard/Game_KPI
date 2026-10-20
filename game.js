@@ -349,13 +349,13 @@ function setupTutBoard(step){
     if(step===0){
       /* 横向：row3=[0,0,1,0]，交换 c2/c3 → 三连 */
       board[3][0].t=0; board[3][1].t=0; board[3][2].t=1; board[3][3].t=0;
-      hintCells={a:{r:3,c:2},b:{r:3,c:3}};
+      hintCells={a:{r:3,c:2},b:{r:3,c:3}}; hintT=Date.now()+1e9;
     } else {
       /* 纵向借位：row4=[2,2,3,2] 且 (3,2)=2，把 (4,2) 往上滑 → row4 四连；
          c4 固定≠2，保证恰好四连不变成五连 */
       board[4][0].t=2; board[4][1].t=2; board[4][2].t=3; board[4][3].t=2;
       board[4][4].t=3; board[3][2].t=2;
-      hintCells={a:{r:4,c:2},b:{r:3,c:2}};
+      hintCells={a:{r:4,c:2},b:{r:3,c:2}}; hintT=Date.now()+1e9;
     }
     guard++;
   }while(findMatches().cells.length>0&&guard<300);
@@ -374,7 +374,7 @@ function tutAdvance(){
       tutText='点一下发光的特殊棋子，试试爆破！';
       for(var r=0;r<ROWS;r++) for(var c=0;c<COLS;c++){
         var t=board[r][c];
-        if(t&&isSpecial(t)&&!t.pop) hintCells={a:{r:r,c:c},b:{r:r,c:c}};
+        if(t&&isSpecial(t)&&!t.pop){ hintCells={a:{r:r,c:c},b:{r:r,c:c}}; hintT=Date.now()+1e9; }
       }
     }
   } else if(tutStep===2){
@@ -1018,7 +1018,8 @@ function drawTools(){
   }
 }
 function drawHint(now){
-  if(!hintCells||now-hintT>2200) return;
+  if(!hintCells||(now-hintT>2200&&hintT<=now+1)) return;
+
   var p1=cellXY(hintCells.a.r,hintCells.a.c), p2=cellXY(hintCells.b.r,hintCells.b.c);
   ctx.save();
   ctx.globalAlpha=0.45+0.45*Math.sin(now/180);
