@@ -18,6 +18,20 @@ var EMOJI=['📊','📝','👔','🏠','☕'];
 /* 压力值：房贷5 > KPI3 > 甲方2 > 周报1 = 咖啡1 */
 var PRESSURE=[3,1,2,5,1];
 var PNAME=['KPI','周报','甲方','房贷','咖啡'];
+/* 关卡：kind=score 达分 / collect 消指定怪；frozen 冰冻数；weights 出生权重；coffeePlus 咖啡加步；cascadeDouble 连锁翻倍 */
+var LEVELS=[
+  {name:'入职第一天', moves:25, kind:'score',   v:2500, stars:[2500,4200,6000]},
+  {name:'周报地狱',   moves:25, kind:'collect', t:1, n:15, stars:[2000,3800,5500]},
+  {name:'甲方爸爸',   moves:26, kind:'collect', t:2, n:16, stars:[2500,4500,6500]},
+  {name:'KPI大考',    moves:28, kind:'score',   v:6000, stars:[6000,9000,13000]},
+  {name:'冰封工位',   moves:28, kind:'score',   v:5000, frozen:6, stars:[5000,8000,12000]},
+  {name:'房贷压顶',   moves:26, kind:'collect', t:3, n:12, weights:[2,2,2,5,2], stars:[3000,5500,8000]},
+  {name:'咖啡续命',   moves:24, kind:'score',   v:7000, coffeePlus:true, stars:[7000,10500,15000]},
+  {name:'连锁风暴',   moves:26, kind:'score',   v:9000, cascadeDouble:true, stars:[9000,14000,20000]},
+  {name:'冰封大楼',   moves:30, kind:'score',   v:8500, frozen:12, stars:[8500,13000,19000]},
+  {name:'终极述职',   moves:30, kind:'collect', t:3, n:18, frozen:6, weights:[2,2,2,5,2], stars:[5000,9000,14000]}
+];
+var curLevel=null, levelIdx=0, collected=0, endWin=false;
 
 var state='start', score=0, moves=MOVES, cascade=0, mode='classic';
 var board=[], phase='idle', phaseT=0, pend=null, lastFocus=null, selTile=null;
@@ -31,6 +45,7 @@ var RND=Math.random;
 var tutDone=false; try{ tutDone=!!wx.getStorageSync('nkpi_tut'); }catch(e){}
 var startBtn={x:0,y:0,w:0,h:0}, againBtn={x:0,y:0,w:0,h:0};
 var modeBtn={x:0,y:0,w:0,h:0}, shareBtn={x:0,y:0,w:0,h:0};
+var levelsBtn={x:0,y:0,w:0,h:0}, backBtn={x:0,y:0,w:0,h:0};
 var toolHBtn={x:0,y:0,w:0,h:0}, toolBBtn={x:0,y:0,w:0,h:0}, hintBtn={x:0,y:0,w:0,h:0};
 var SPR={};
 
@@ -98,6 +113,8 @@ function layout(){
   modeBtn={x:(W-btw)/2,y:H*0.58+bth+8,w:btw,h:48};
   againBtn={x:(W-btw)/2,y:H*0.64,w:btw,h:bth};
   shareBtn={x:(W-btw)/2,y:H*0.64+bth+8,w:btw,h:48};
+  levelsBtn={x:(W-btw)/2,y:H*0.58+bth+8+56,w:btw,h:48};
+  backBtn={x:(W-160)/2,y:H-110,w:160,h:44};
   var tw=90, tx0=(W-(tw*3+20))/2, ty2=H-60;
   toolHBtn={x:tx0,y:ty2,w:tw,h:44};
   toolBBtn={x:tx0+tw+10,y:ty2,w:tw,h:44};
@@ -156,10 +173,25 @@ function loadSprites(){
 }
 
 /* ============ 棋盘模型 ============ */
-function mkTile(t){ return {t:t,x:0,y:0,tx:0,ty:0,pop:0}; }
+function mkTile(t){ return {t:t,x:0,y:0,tx:0,ty:0,pop:0,ice:0}; }
+function loadProg(){ try{ var p=JSON.parse(wx.getStorageSync('nkpi_prog')||'{}'); return (p&&typeof p==='object')?p:{}; }catch(e){ return {}; } }
+function saveProg(p){ try{ wx.setStorageSync('nkpi_prog',JSON.stringify(p)); }catch(e){} }
+function levelRect(i){
+  var cols=4, s=64, gap=14;
+  var x0=(W-(cols*s+(cols-1)*gap))/2, y0=120;
+  return {x:x0+(i%cols)*(s+gap), y:y0+((i/cols)|0)*(s+gap+16), w:s, h:s};
+}
 function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; var t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
 function todaySeed(){ var d=new Date(); return d.getFullYear()*10000+(d.getMonth()+1)*100+d.getDate(); }
-function randType(){ return (RND()*NTYPES)|0; }
+function randType(){
+  var w=(curLevel&&curLevel.weights)?curLevel.weights:null;
+  if(!w) return (RND()*NTYPES)|0;
+  var sum=0, i;
+  for(i=0;i<NTYPES;i++) sum+=w[i];
+  var x=RND()*sum;
+  for(i=0;i<NTYPES;i++){ x-=w[i]; if(x<0) return i; }
+  return NTYPES-1;
+}
 function tileAt(r,c){ if(r<0||r>=ROWS||c<0||c>=COLS) return null; return board[r][c]; }
 function isSpecial(t){ return t&&(t.t==='H'||t.t==='B'); }
 
@@ -197,10 +229,10 @@ function findMatches(){
 function findHint(){
   var dirs=[[0,1],[1,0]];
   for(var r=0;r<ROWS;r++) for(var c=0;c<COLS;c++){
-    var t=board[r][c]; if(!t||isSpecial(t)) continue;
+    var t=board[r][c]; if(!t||isSpecial(t)||t.ice) continue;
     for(var d=0;d<2;d++){
       var r2=r+dirs[d][0], c2=c+dirs[d][1];
-      var t2=tileAt(r2,c2); if(!t2||isSpecial(t2)) continue;
+      var t2=tileAt(r2,c2); if(!t2||isSpecial(t2)||t2.ice) continue;
       board[r][c]=t2; board[r2][c2]=t;
       var hit=findMatches().cells.length>0;
       board[r][c]=t; board[r2][c2]=t2;
@@ -219,6 +251,7 @@ function mostCommonType(){
   for(var i=1;i<NTYPES;i++) if(cnt[i]>cnt[mt]) mt=i;
   return mt;
 }
+function noteCollect(tp){ if(mode==='level'&&curLevel&&curLevel.kind==='collect'&&tp===curLevel.t) collected++; }
 
 function newBoard(){
   var guard=0;
@@ -260,17 +293,27 @@ function burst(x,y,big,pv){
 function addPopup(x,y,text,color,size){ popups.push({x:x,y:y,text:text,color:color,size:size||18,life:1}); }
 
 /* ============ 流程 ============ */
-function startGame(m){
+function startGame(m,li){
   ensureAudio();
   mode=m||'classic';
+  levelIdx=li||0;
+  curLevel=mode==='level'?LEVELS[levelIdx]:null;
   RND = mode==='daily' ? mulberry32(todaySeed()) : Math.random;
-  state='playing'; score=0; moves=MOVES; cascade=0;
+  state='playing'; score=0; cascade=0; collected=0; endWin=false;
+  moves=curLevel?curLevel.moves:MOVES;
   parts=[]; popups=[]; hammers=[]; rings=[]; bigTexts=[];
   flashA=0; shakeT=0; selTile=null; pend=null; lastFocus=null;
   tools={H:1,B:1}; armedTool=null; pendingFree=false;
   hintCells=null;
   phase='idle'; phaseT=0;
   newBoard();
+  if(curLevel&&curLevel.frozen){
+    var placed=0, guard=0;
+    while(placed<curLevel.frozen&&guard<300){ guard++;
+      var fr=(RND()*ROWS)|0, fc=(RND()*COLS)|0, ft=board[fr][fc];
+      if(ft&&!ft.ice){ ft.ice=1; placed++; }
+    }
+  }
 }
 
 function trySwap(r1,c1,r2,c2){
@@ -278,6 +321,7 @@ function trySwap(r1,c1,r2,c2){
   var a=board[r1][c1], b=board[r2][c2];
   if(!a||!b) return;
   if(isSpecial(a)||isSpecial(b)){ sDeny(); return; }
+  if(a.ice||b.ice){ sDeny(); return; }
   board[r1][c1]=b; board[r2][c2]=a;
   var p1=cellXY(r1,c1), p2=cellXY(r2,c2);
   a.tx=p2.x; a.ty=p2.y; b.tx=p1.x; b.ty=p1.y;
@@ -320,25 +364,32 @@ function doPop(m,focus){
     if(inM) pcell={r:focus.r,c:focus.c};
     else { var mc=best.cells[(best.cells.length/2)|0]; pcell={r:mc.r,c:mc.c}; }
   }
-  var gained=0, maxP=0, nFangdai=0;
+  var cmult=cascade*((curLevel&&curLevel.cascadeDouble)?2:1);
+  var gained=0, maxP=0, nFangdai=0, nCoffee=0;
   for(i=0;i<m.cells.length;i++){
     var cc=m.cells[i], t=board[cc.r][cc.c];
     if(!t||t.pop) continue;
     var pp=cellXY(cc.r,cc.c);
     if(pcell&&cc.r===pcell.r&&cc.c===pcell.c){
-      t.t=power; t.pop=0;
+      t.t=power; t.pop=0; t.ice=0;
       rings.push({x:pp.x,y:pp.y,t0:now,big:true,color:power==='B'?'#ffd54a':'#ff9f1c'});
       addPopup(pp.x,pp.y-8,power==='B'?'老板炸弹!':'锤子!',power==='B'?'#ffd54a':'#ff9f1c',16);
       burst(pp.x,pp.y,true,3);
+    } else if(t.ice){
+      t.ice--; gained+=5*cmult;
+      rings.push({x:pp.x,y:pp.y,t0:now,big:false,color:'#9fd8ff'});
+      burst(pp.x,pp.y,false,1);
     } else {
       var pv=PRESSURE[t.t];
-      t.pop=now; gained+=pv*10*cascade;
+      t.pop=now; gained+=pv*10*cmult;
       if(pv>maxP) maxP=pv;
       if(t.t===3) nFangdai++;
+      if(t.t===4) nCoffee++;
+      noteCollect(t.t);
       burst(pp.x,pp.y,false,pv);
     }
   }
-  if(best&&best.len>=4) gained+=(best.len>=5||lshape?150:50)*cascade;
+  if(best&&best.len>=4) gained+=(best.len>=5||lshape?150:50)*cmult;
   var fp=focus?cellXY(focus.r,focus.c):{x:W/2,y:H/2};
   if(maxP>=5){
     shakeT=Math.max(shakeT,0.16);
@@ -351,6 +402,10 @@ function doPop(m,focus){
   if(gained>0){
     score+=gained;
     addPopup(fp.x,fp.y-4,'+'+gained,'#ffd54a',19);
+  }
+  if(curLevel&&curLevel.coffeePlus&&nCoffee>0){
+    moves+=nCoffee;
+    addPopup(fp.x,fp.y+36,'+'+nCoffee+' 步 ☕续命','#69f0ae',17);
   }
   if(cascade>1){
     var praise=cascade>=4?'神之一手!':cascade===3?'无敌!':'漂亮!';
@@ -407,7 +462,10 @@ function onSettled(){
 function endMove(){
   if(pendingFree) pendingFree=false; else moves--;
   cascade=0; lastFocus=null; selTile=null;
-  if(moves<=0){ endGame(); return; }
+  if(mode==='level'){
+    if(targetMet()){ levelEnd(true); return; }
+    if(moves<=0){ levelEnd(false); return; }
+  } else if(moves<=0){ endGame(); return; }
   if(!hasValidMove()){
     shuffleBoard();
     bigTexts.push({text:'无路可走，洗牌!',color:'#9fb0ff',t0:Date.now()});
@@ -422,7 +480,7 @@ function smashAt(r,c){
   if(tc&&isSpecial(tc)) tc.pop=now;
   for(var dr=-1;dr<=1;dr++) for(var dc=-1;dc<=1;dc++){
     var t2=tileAt(r+dr,c+dc);
-    if(t2&&!t2.pop&&!isSpecial(t2)){ t2.pop=now; score+=PRESSURE[t2.t]*10; var q=cellXY(r+dr,c+dc); burst(q.x,q.y,true,3); }
+    if(t2&&!t2.pop&&!isSpecial(t2)){ t2.pop=now; score+=PRESSURE[t2.t]*10; noteCollect(t2.t); var q=cellXY(r+dr,c+dc); burst(q.x,q.y,true,3); }
   }
   hammers.push({x:p.x,y:p.y,t0:now});
   rings.push({x:p.x,y:p.y,t0:now,big:true,color:'#ff9f1c'});
@@ -436,7 +494,7 @@ function clearType(tp,label){
   var n=0;
   for(var r=0;r<ROWS;r++) for(var c=0;c<COLS;c++){
     var v=board[r][c];
-    if(v&&!v.pop&&!isSpecial(v)&&v.t===tp){ v.pop=now; score+=PRESSURE[v.t]*10; n++;
+    if(v&&!v.pop&&!isSpecial(v)&&v.t===tp){ v.pop=now; score+=PRESSURE[v.t]*10; noteCollect(v.t); n++;
       var w=cellXY(r,c); burst(w.x,w.y,false,2); }
   }
   flashA=0.30; shakeT=0.25;
@@ -485,6 +543,28 @@ function endGame(){
     else if(score>store.get()) store.set(score);
   }catch(e){}
 }
+function targetMet(){
+  if(!curLevel) return false;
+  return curLevel.kind==='score'? score>=curLevel.v : collected>=curLevel.n;
+}
+function starCount(){
+  var s=curLevel.stars;
+  var n=score>=s[2]?3:score>=s[1]?2:score>=s[0]?1:0;
+  return Math.max(1,n);
+}
+function levelEnd(win){
+  endWin=win; state='end';
+  if(win){
+    sFanfare();
+    var st=starCount(), prog=loadProg();
+    prog.stars=prog.stars||{};
+    if(st>(prog.stars[levelIdx]||0)) prog.stars[levelIdx]=st;
+    prog.unlocked=Math.max(prog.unlocked||1, Math.min(LEVELS.length, levelIdx+2));
+    saveProg(prog);
+  } else {
+    tone(300,140,0.45,'sawtooth',0.12);
+  }
+}
 
 /* ============ 输入 ============ */
 function handleTap(x,y){
@@ -498,6 +578,7 @@ function handleTap(x,y){
   if(!cc) { selTile=null; return; }
   var t=board[cc.r][cc.c];
   if(!t){ selTile=null; return; }
+  if(t.ice){ selTile=null; sDeny(); return; }
   if(isSpecial(t)){ activateSpecial(cc.r,cc.c); selTile=null; return; }
   if(!selTile){ selTile={r:cc.r,c:cc.c}; sSelect(); return; }
   if(selTile.r===cc.r&&selTile.c===cc.c){ selTile=null; return; }
@@ -518,11 +599,31 @@ try{
     if(state==='start'){
       if(inRect(t.clientX,t.clientY,startBtn)) startGame('classic');
       else if(inRect(t.clientX,t.clientY,modeBtn)) startGame('daily');
+      else if(inRect(t.clientX,t.clientY,levelsBtn)) state='levels';
+      return;
+    }
+    if(state==='levels'){
+      if(inRect(t.clientX,t.clientY,backBtn)){ state='start'; return; }
+      var prog=loadProg(), un=prog.unlocked||1;
+      for(var li=0;li<LEVELS.length;li++){
+        if(inRect(t.clientX,t.clientY,levelRect(li))){
+          if(li<un) startGame('level',li); else sDeny();
+          return;
+        }
+      }
       return;
     }
     if(state==='end'){
-      if(inRect(t.clientX,t.clientY,againBtn)) startGame(mode);
-      else if(inRect(t.clientX,t.clientY,shareBtn)) shareScore();
+      if(inRect(t.clientX,t.clientY,againBtn)){
+        if(mode==='level'){
+          if(endWin&&levelIdx<LEVELS.length-1) startGame('level',levelIdx+1);
+          else startGame('level',levelIdx);
+        } else startGame(mode);
+      }
+      else if(inRect(t.clientX,t.clientY,shareBtn)){
+        if(mode==='level'&&!endWin) state='levels';
+        else shareScore();
+      }
       return;
     }
     if(phase!=='idle') return;
@@ -578,6 +679,11 @@ function drawHUD(){
   var best=mode==='daily'?store.getDaily():store.get();
   if(best>0) txt((mode==='daily'?'今日':'历史')+'最佳 '+Math.max(best,score),W-20,76,12,'#8a8aa8','right',600);
   if(mode==='daily') txt('📅 今日挑战',W/2,20,13,'#9fb0ff','center',700);
+  if(mode==='level'&&curLevel){
+    var tg=curLevel.kind==='score'?('🎯 '+Math.min(score,curLevel.v)+'/'+curLevel.v):('🎯 '+PNAME[curLevel.t]+' 还差 '+Math.max(0,curLevel.n-collected));
+    txt(tg,W/2,20,13.5,'#ffd54a','center',800);
+    txt('第'+(levelIdx+1)+'关 · '+curLevel.name,W/2,44,11.5,'#8a8aa8','center',600);
+  }
 }
 
 function drawBoard(){
@@ -645,6 +751,16 @@ function drawTile(t){
   ctx.restore();
   ctx.strokeStyle='rgba(255,255,255,0.22)'; ctx.lineWidth=1;
   rr(-s/2+0.5,-s/2+0.5,s-1,s-1,11); ctx.stroke();
+  if(t.ice){
+    ctx.save(); rr(-s/2,-s/2,s,s,12); ctx.clip();
+    ctx.fillStyle='rgba(150,215,255,0.50)'; ctx.fillRect(-s/2,-s/2,s,s);
+    ctx.strokeStyle='rgba(255,255,255,0.8)'; ctx.lineWidth=1.5;
+    ctx.beginPath();
+    ctx.moveTo(-s*0.30,-s*0.28); ctx.lineTo(-s*0.04,-s*0.02); ctx.lineTo(-s*0.18,s*0.26);
+    ctx.moveTo(s*0.28,-s*0.24); ctx.lineTo(s*0.02,s*0.08); ctx.lineTo(s*0.24,s*0.30);
+    ctx.stroke();
+    ctx.restore();
+  }
   if(selTile&&board[selTile.r]&&board[selTile.r][selTile.c]===t){
     ctx.strokeStyle='#ffd54a'; ctx.lineWidth=3;
     rr(-s/2-4,-s/2-4,s+8,s+8,15); ctx.stroke();
@@ -779,11 +895,49 @@ function drawStart(){
   for(var i=0;i<lines.length;i++) txt(lines[i],W/2,by2+26+i*27,14,'#d7dcff','center',600);
   button(startBtn,'经典模式');
   button2(modeBtn,'📅 每日挑战');
-  txt('经典最佳 '+store.get()+' · 今日最佳 '+store.getDaily(),W/2,modeBtn.y+modeBtn.h+26,13,'#8a8aa8','center',600);
+  button2(levelsBtn,'📖 关卡模式');
+  txt('经典最佳 '+store.get()+' · 今日最佳 '+store.getDaily(),W/2,levelsBtn.y+levelsBtn.h+26,13,'#8a8aa8','center',600);
 }
 
+function drawLevels(){
+  dim();
+  txt('关卡选择',W/2,64,26,'#ffffff','center',900);
+  txt('每关一个特许规则：配额 · 冰冻 · 续命 · 风暴…',W/2,94,12.5,'#9fb0ff','center',600);
+  var prog=loadProg(), un=prog.unlocked||1, stars=prog.stars||{};
+  for(var i=0;i<LEVELS.length;i++){
+    var r=levelRect(i), locked=i>=un;
+    ctx.fillStyle=locked?'#23233c':'#33335e'; rr(r.x,r.y,r.w,r.h,14); ctx.fill();
+    ctx.strokeStyle=locked?'#3a3a55':'#9fb0ff'; ctx.lineWidth=1.5; rr(r.x,r.y,r.w,r.h,14); ctx.stroke();
+    txt(locked?'🔒':String(i+1),r.x+r.w/2,r.y+22,locked?19:23,locked?'#5a5a72':'#ffffff','center',900);
+    var st=stars[i]||0, ss='';
+    for(var k=0;k<st;k++) ss+='★';
+    if(ss) txt(ss,r.x+r.w/2,r.y+46,11,'#ffd54a','center',700);
+    txt(LEVELS[i].name,r.x+r.w/2,r.y+r.h+11,10,'#8a8aa8','center',600);
+  }
+  button2(backBtn,'← 返回');
+}
+function drawLevelEnd(){
+  if(endWin){
+    var st=starCount();
+    txt('过关!',W/2,H*0.14,26,'#69f0ae','center',900);
+    ctx.font='44px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+    for(var i=0;i<3;i++){ ctx.fillStyle=i<st?'#ffd54a':'#3a3a52'; ctx.fillText(i<st?'★':'☆',W/2-52+i*52,H*0.14+52); }
+    txt(String(score),W/2,H*0.14+122,58,'#ffd54a','center',900);
+    txt('第'+(levelIdx+1)+'关 · '+curLevel.name,W/2,H*0.14+162,15,'#b9c0e8','center',600);
+    button(againBtn, levelIdx<LEVELS.length-1?'下一关':'重玩本关');
+    button2(shareBtn,'📤 分享战绩');
+  } else {
+    txt('就差一点!',W/2,H*0.14,26,'#ff8a80','center',900);
+    var pg=curLevel.kind==='score'?('分数 '+score+' / 目标 '+curLevel.v):(PNAME[curLevel.t]+' 已消 '+collected+' / '+curLevel.n);
+    txt(pg,W/2,H*0.14+56,17,'#d7dcff','center',700);
+    txt('第'+(levelIdx+1)+'关 · '+curLevel.name,W/2,H*0.14+88,14,'#8a8aa8','center',600);
+    button(againBtn,'再试一次');
+    button2(shareBtn,'回选关');
+  }
+}
 function drawEnd(){
   dim();
+  if(mode==='level'){ drawLevelEnd(); return; }
   var stars=score>=10000?3:score>=6500?2:score>=3000?1:0;
   txt(mode==='daily'?'今日挑战结束!':'对局结束!',W/2,H*0.14,20,'#9fb0ff','center',800);
   ctx.font='44px sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
@@ -816,6 +970,8 @@ function draw(now){
     }
   } else if(state==='start'){
     drawStart();
+  } else if(state==='levels'){
+    drawLevels();
   } else {
     drawHUD(); drawBoard(); drawEnd();
   }
