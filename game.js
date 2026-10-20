@@ -977,7 +977,17 @@ function drawBoard(){
   for(r=0;r<ROWS;r++) for(c=0;c<COLS;c++){
     var t=board[r][c]; if(t) drawTile(t);
   }
-  txt('滑动交换凑3连消 · 关卡里先清压力',W/2,by+bw+30,12.5,'#9a9ab8','center',600);
+  /* 帮助文字：高对比度底板；道具点亮时由道具说明替代，避免重叠 */
+  if(!armedTool){
+    var hy=Math.min(by+bw+26, hintBtn.y-18);
+    if(hy>by+bw+12){
+      var hs=mode==='level'?'滑动交换凑3连消 · 先把压力清零':'滑动交换凑3连消 · 4连出锤子 · 5连出老板';
+      ctx.font='700 13px sans-serif';
+      var hw=Math.min(W-16, ctx.measureText(hs).width+24);
+      ctx.fillStyle='rgba(255,255,255,0.9)'; rr(W/2-hw/2,hy-12,hw,24,12); ctx.fill();
+      txt(hs,W/2,hy,13,'#3a3f6b','center',700);
+    }
+  }
 }
 
 function drawTile(t){
@@ -1157,7 +1167,8 @@ function drawTools(){
   if(armedTool){
     var a2=0.6+0.4*Math.sin(Date.now()/300);
     ctx.save(); ctx.globalAlpha=a2;
-    txt(armedTool==='H'?'点棋盘任意位置：锤爆 3×3':'点一只怪：清掉全场同类',W/2,hintBtn.y-16,13,'#d97c00','center',800);
+    txt(armedTool==='H'?'点棋盘任意位置：锤爆 3×3':'点一只怪：清掉全场同类',W/2,Math.min(by+cell*COLS+26,hintBtn.y-18),13,'#d97c00','center',800);
+
     ctx.restore();
   }
 }
